@@ -1,10 +1,33 @@
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-import { clerkMiddleware } from '@clerk/express';
-import { serve } from "inngest/express";
-import { inngest, functions } from "../inngest/index.js";
-import prisma from "../configs/prisma.js";
+
+// Lazy load to catch import errors
+let clerkMiddleware, serve, inngest, functions, prisma;
+
+try {
+  const clerkModule = await import('@clerk/express');
+  clerkMiddleware = clerkModule.clerkMiddleware;
+} catch (e) {
+  console.error('Failed to load Clerk:', e.message);
+}
+
+try {
+  const inngestExpress = await import('inngest/express');
+  serve = inngestExpress.serve;
+  const inngestModule = await import('../inngest/index.js');
+  inngest = inngestModule.inngest;
+  functions = inngestModule.functions;
+} catch (e) {
+  console.error('Failed to load Inngest:', e.message);
+}
+
+try {
+  const prismaModule = await import('../configs/prisma.js');
+  prisma = prismaModule.default;
+} catch (e) {
+  console.error('Failed to load Prisma:', e.message);
+}
 
 const app = express();
 
@@ -29,11 +52,13 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-// Clerk authentication middleware
-app.use(clerkMiddleware({
-    secretKey: process.env.CLERK_SECRET_KEY,
-    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-}));
+// Clerk authentication middleware (if loaded)
+if (clerkMiddleware) {
+  app.use(clerkMiddleware({
+      secretKey: process.env.CLERK_SECRET_KEY,
+      publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+  }));
+}
 
 // Health check endpoint
 app.get('/', (req, res) => res.json({ 
@@ -48,28 +73,36 @@ app.get('/api', (req, res) => res.json({
   message: 'API endpoint working!'
 }));
 
-// Inngest webhook endpoint
-app.use("/api/inngest", serve({ client: inngest, functions }));
+// Inngest webhook endpoint (if loaded)
+if (serve && inngest && functions) {
+  app.use("/api/inngest", serve({ client: inngest, functions }));
+}
 
 // Example: Get all workspaces for current user
 app.get('/api/workspaces', async (req, res) => {
+  if (!prisma) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
   try {
     const workspaces = await prisma.workspace.findMany();
     res.json(workspaces);
   } catch (error) {
     console.error('Error fetching workspaces:', error);
-    res.status(500).json({ error: 'Failed to fetch workspaces' });
+    res.status(500).json({ error: 'Failed to fetch workspaces', details: error.message });
   }
 });
 
 // Example: Get all projects
 app.get('/api/projects', async (req, res) => {
+  if (!prisma) {
+    return res.status(500).json({ error: 'Database not connected' });
+  }
   try {
     const projects = await prisma.project.findMany();
     res.json(projects);
   } catch (error) {
     console.error('Error fetching projects:', error);
-    res.status(500).json({ error: 'Failed to fetch projects' });
+    res.status(500).json({ error: 'Failed to fetch projects', details: error.message });
   }
 });
 

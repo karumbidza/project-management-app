@@ -4,7 +4,8 @@
   "description": "",
   "main": "api/index.js",
   "scripts": {
-    "build": "echo 'Build complete'",
+    "build": "prisma generate",
+    "postinstall": "prisma generate",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
