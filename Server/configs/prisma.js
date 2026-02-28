@@ -1,16 +1,13 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import {PrismaNeon} from '@prisma/adapter-neon';
-import { neon, neonConfig } from '@neondatabase/serverless'; 
 
-import ws from 'ws';
-neonConfig.webSocketConstructor = ws;
+// Use global prisma instance in development to prevent multiple connections
+const globalForPrisma = globalThis;
 
-const connectionString = '${process.env.DATABASE_URL}';
+const prisma = globalForPrisma.prisma ?? new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
 
-const adapter = new PrismaNeon({connectionString});
-const prisma = global.prisma || new PrismaClient({adapter});
-if (process.env.NODE_ENV === 'development') global.prisma = prisma;
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export default prisma;
-
