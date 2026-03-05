@@ -1,12 +1,17 @@
 import { useState } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { useAuth } from "@clerk/clerk-react";
 import { format } from "date-fns";
+import { createTaskAsync } from "../features/workspaceSlice";
+import toast from "react-hot-toast";
 
 export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, projectId }) {
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
-    const project = currentWorkspace?.projects.find((p) => p.id === projectId);
+    const project = currentWorkspace?.projects?.find((p) => p.id === projectId);
     const teamMembers = project?.members || [];
+    const dispatch = useDispatch();
+    const { getToken } = useAuth();
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
@@ -22,7 +27,54 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
     const handleSubmit = async (e) => {
         e.preventDefault();
 
+        if (!formData.title.trim()) {
+            toast.error("Task title is required");
+            return;
+        }
 
+        if (!formData.due_date) {
+            toast.error("Due date is required");
+            return;
+        }
+
+        if (!formData.assigneeId) {
+            toast.error("Please assign the task to someone");
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            await dispatch(createTaskAsync({
+                projectId,
+                taskData: {
+                    title: formData.title,
+                    description: formData.description,
+                    type: formData.type,
+                    status: formData.status,
+                    priority: formData.priority,
+                    assigneeId: formData.assigneeId,
+                    due_date: formData.due_date,
+                },
+                getToken,
+            })).unwrap();
+            
+            toast.success("Task created successfully!");
+            setShowCreateTask(false);
+            // Reset form
+            setFormData({
+                title: "",
+                description: "",
+                type: "TASK",
+                status: "TODO",
+                priority: "MEDIUM",
+                assigneeId: "",
+                due_date: "",
+            });
+        } catch (error) {
+            toast.error(error || "Failed to create task");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return showCreateTask ? (

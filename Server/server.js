@@ -4,13 +4,24 @@ import 'dotenv/config';
 import { clerkMiddleware } from '@clerk/express';
 import { serve } from "inngest/express";
 import { inngest, functions } from "./inngest/index.js";
+import workspaceRouter from './routes/workspaceRoutes.js';
+import projectRouter from './routes/projectRoutes.js';
+import taskRouter from './routes/taskRoutes.js';
+import webhookRouter from './routes/webhookRoutes.js';
+import { protect } from './middlewares/authMiddleware.js';
 
 const app = express();
 
 // Security: Configure CORS for production
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
   'http://localhost:5173',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://localhost:5176',
+  'http://localhost:5177',
+  'http://localhost:5178',
+  'http://localhost:5179',
 ];
 
 app.use(cors({
@@ -20,10 +31,17 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+    // Allow all localhost ports in development
+    if (origin.startsWith('http://localhost:')) {
+      return callback(null, true);
+    }
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
+
+// Webhook routes BEFORE json parser (needs raw body)
+app.use('/api/webhooks', webhookRouter);
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -42,6 +60,13 @@ app.get('/', (req, res) => res.json({
 
 // Inngest webhook endpoint
 app.use("/api/inngest", serve({ client: inngest, functions }));
+
+//routes
+
+app.use('/api/workspaces', protect , workspaceRouter);
+app.use('/api/projects', protect, projectRouter);
+app.use('/api/tasks', protect, taskRouter);
+
 
 // For local development
 if (process.env.NODE_ENV !== 'production') {

@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { XIcon } from "lucide-react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { useAuth } from "@clerk/clerk-react";
+import { createProjectAsync } from "../features/workspaceSlice";
+import toast from "react-hot-toast";
 
 const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
 
     const { currentWorkspace } = useSelector((state) => state.workspace);
+    const dispatch = useDispatch();
+    const { getToken } = useAuth();
 
     const [formData, setFormData] = useState({
         name: "",
@@ -23,6 +28,50 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         
+        if (!currentWorkspace) {
+            toast.error("No workspace selected");
+            return;
+        }
+
+        if (!formData.name.trim()) {
+            toast.error("Project name is required");
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
+            const result = await dispatch(createProjectAsync({
+                workspaceId: currentWorkspace.id,
+                projectData: {
+                    name: formData.name,
+                    description: formData.description,
+                    status: formData.status,
+                    priority: formData.priority,
+                    start_date: formData.start_date || null,
+                    end_date: formData.end_date || null,
+                },
+                getToken,
+            })).unwrap();
+            
+            toast.success("Project created successfully!");
+            setIsDialogOpen(false);
+            // Reset form
+            setFormData({
+                name: "",
+                description: "",
+                status: "PLANNING",
+                priority: "MEDIUM",
+                start_date: "",
+                end_date: "",
+                team_members: [],
+                team_lead: "",
+                progress: 0,
+            });
+        } catch (error) {
+            toast.error(error || "Failed to create project");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const removeTeamMember = (email) => {

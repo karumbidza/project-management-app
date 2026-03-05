@@ -25,7 +25,9 @@
     "express": "^5.2.1",
     "inngest": "^3.52.4",
     "prisma": "^5.22.0",
-    "ws": "^8.19.0"
+    "svix": "^1.86.0",
+    "ws": "^8.19.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.3.2",

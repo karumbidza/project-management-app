@@ -4,19 +4,28 @@ import Sidebar from '../components/Sidebar'
 import { Outlet } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
+import { fetchWorkspaces } from '../features/workspaceSlice'
 import { Loader2Icon } from 'lucide-react'
-import { SignIn, useUser } from '@clerk/clerk-react'
+import { SignIn, useUser, useAuth } from '@clerk/clerk-react'
 
 function Layout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-    const { loading } = useSelector((state) => state.workspace)
+    const { loading, error } = useSelector((state) => state.workspace)
     const dispatch = useDispatch()
     const { user, isLoaded } = useUser()
+    const { getToken } = useAuth()
 
     // Initial load of theme
     useEffect(() => {
         dispatch(loadTheme())
-    }, [])
+    }, [dispatch])
+
+    // Fetch workspaces when user is authenticated
+    useEffect(() => {
+        if (user && getToken) {
+            dispatch(fetchWorkspaces(getToken))
+        }
+    }, [user, getToken, dispatch])
 
     // 1. First: Wait for Clerk to finish loading
     if (!isLoaded) {
@@ -42,6 +51,21 @@ function Layout() {
             <Loader2Icon className="size-7 text-blue-500 animate-spin" />
         </div>
     )
+
+    // 4. Show error if fetch failed
+    if (error) {
+        return (
+            <div className='flex flex-col items-center justify-center h-screen bg-white dark:bg-zinc-950'>
+                <p className="text-red-500 mb-4">Error: {error}</p>
+                <button 
+                    onClick={() => dispatch(fetchWorkspaces(getToken))}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                    Retry
+                </button>
+            </div>
+        )
+    }
 
     return (
         <div className="flex bg-white dark:bg-zinc-950 text-gray-900 dark:text-slate-100">
