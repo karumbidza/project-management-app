@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeftIcon, PlusIcon, SettingsIcon, BarChart3Icon, CalendarIcon, FileStackIcon, ZapIcon } from "lucide-react";
+import { ArrowLeftIcon, PlusIcon, SettingsIcon, BarChart3Icon, CalendarIcon, FileStackIcon, ZapIcon, GanttChart } from "lucide-react";
 import ProjectAnalytics from "../components/ProjectAnalytics";
 import ProjectSettings from "../components/ProjectSettings";
 import CreateTaskDialog from "../components/CreateTaskDialog";
 import ProjectCalendar from "../components/ProjectCalendar";
 import ProjectTasks from "../components/ProjectTasks";
+import ProjectGantt from "../components/ProjectGantt";
+import useUserRole from "../hooks/useUserRole";
 
 export default function ProjectDetail() {
 
@@ -15,7 +17,17 @@ export default function ProjectDetail() {
     const id = searchParams.get('id');
 
     const navigate = useNavigate();
-    const projects = useSelector((state) => state?.workspace?.currentWorkspace?.projects || []);
+    const { isMemberView } = useUserRole();
+    
+    // Get projects from either workspace (admin) or myProjects (member)
+    const workspaceProjects = useSelector((state) => state?.workspace?.currentWorkspace?.projects || []);
+    const myProjects = useSelector((state) => state?.workspace?.myProjects || []);
+    
+    // Combine projects from both sources
+    const projects = useMemo(() => {
+        if (myProjects.length > 0) return myProjects;
+        return workspaceProjects;
+    }, [workspaceProjects, myProjects]);
 
     const [project, setProject] = useState(null);
     const [tasks, setTasks] = useState([]);
@@ -46,8 +58,8 @@ export default function ProjectDetail() {
         return (
             <div className="p-6 text-center text-zinc-900 dark:text-zinc-200">
                 <p className="text-3xl md:text-5xl mt-40 mb-10">Project not found</p>
-                <button onClick={() => navigate('/projects')} className="mt-4 px-4 py-2 rounded bg-zinc-200 text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-white dark:hover:bg-zinc-600" >
-                    Back to Projects
+                <button onClick={() => navigate(isMemberView ? '/' : '/projects')} className="mt-4 px-4 py-2 rounded bg-zinc-200 text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-white dark:hover:bg-zinc-600" >
+                    {isMemberView ? 'Back to Dashboard' : 'Back to Projects'}
                 </button>
             </div>
         );
@@ -58,7 +70,7 @@ export default function ProjectDetail() {
             {/* Header */}
             <div className="flex max-md:flex-col gap-4 flex-wrap items-start justify-between max-w-6xl">
                 <div className="flex items-center gap-4">
-                    <button className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400" onClick={() => navigate('/projects')}>
+                    <button className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400" onClick={() => navigate(isMemberView ? '/' : '/projects')}>
                         <ArrowLeftIcon className="w-4 h-4" />
                     </button>
                     <div className="flex items-center gap-3">
@@ -97,6 +109,7 @@ export default function ProjectDetail() {
                 <div className="inline-flex flex-wrap max-sm:grid grid-cols-3 gap-2 border border-zinc-200 dark:border-zinc-800 rounded overflow-hidden">
                     {[
                         { key: "tasks", label: "Tasks", icon: FileStackIcon },
+                        { key: "gantt", label: "Gantt", icon: GanttChart },
                         { key: "calendar", label: "Calendar", icon: CalendarIcon },
                         { key: "analytics", label: "Analytics", icon: BarChart3Icon },
                         { key: "settings", label: "Settings", icon: SettingsIcon },
@@ -112,6 +125,11 @@ export default function ProjectDetail() {
                     {activeTab === "tasks" && (
                         <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
                             <ProjectTasks tasks={tasks} />
+                        </div>
+                    )}
+                    {activeTab === "gantt" && (
+                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
+                            <ProjectGantt tasks={tasks} project={project} />
                         </div>
                     )}
                     {activeTab === "analytics" && (

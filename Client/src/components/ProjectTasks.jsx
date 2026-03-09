@@ -1,10 +1,21 @@
-import { format } from "date-fns";
+import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteTask, updateTask } from "../features/workspaceSlice";
 import { Bug, CalendarIcon, GitCommit, MessageSquare, Square, Trash, XIcon, Zap } from "lucide-react";
+
+// Safe date formatter
+const formatDate = (dateValue, formatStr = "dd MMMM") => {
+    if (!dateValue) return "-";
+    try {
+        const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
+        return isValid(date) ? format(date, formatStr) : "-";
+    } catch {
+        return "-";
+    }
+};
 
 const typeIcons = {
     BUG: { icon: Bug, color: "text-red-600 dark:text-red-400" },
@@ -205,7 +216,7 @@ const ProjectTasks = ({ tasks }) => {
                                                 <td className="px-4 py-2">
                                                     <div className="flex items-center gap-1 text-zinc-600 dark:text-zinc-400">
                                                         <CalendarIcon className="size-4" />
-                                                        {format(new Date(task.due_date), "dd MMMM")}
+                                                        {formatDate(task.dueDate || task.plannedEndDate)}
                                                     </div>
                                                 </td>
                                             </tr>
@@ -263,7 +274,7 @@ const ProjectTasks = ({ tasks }) => {
 
                                         <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
                                             <CalendarIcon className="size-4" />
-                                            {format(new Date(task.due_date), "dd MMMM")}
+                                            {formatDate(task.dueDate || task.plannedEndDate)}
                                         </div>
                                     </div>
                                 );

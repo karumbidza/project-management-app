@@ -24,11 +24,11 @@ const ProjectCard = ({ project }) => {
             </div>
 
             <div className="flex items-center justify-between mb-4">
-                <span className={`px-2 py-0.5 rounded text-xs ${statusColors[project.status]}`} >
-                    {project.status.replace("_", " ")}
+                <span className={`px-2 py-0.5 rounded text-xs ${statusColors[project.status] || statusColors.PLANNING}`} >
+                    {(project.status || 'PLANNING').replace("_", " ")}
                 </span>
                 <span className="text-xs text-gray-500 dark:text-zinc-500 capitalize">
-                    {project.priority} priority
+                    {project.priority || 'medium'} priority
                 </span>
             </div>
 

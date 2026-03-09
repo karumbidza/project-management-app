@@ -16,8 +16,8 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
         description: "",
         status: "PLANNING",
         priority: "MEDIUM",
-        start_date: "",
-        end_date: "",
+        startDate: "",
+        endDate: "",
         team_members: [],
         team_lead: "",
         progress: 0,
@@ -47,8 +47,8 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
                     description: formData.description,
                     status: formData.status,
                     priority: formData.priority,
-                    start_date: formData.start_date || null,
-                    end_date: formData.end_date || null,
+                    startDate: formData.startDate || null,
+                    endDate: formData.endDate || null,
                 },
                 getToken,
             })).unwrap();
@@ -61,8 +61,8 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
                 description: "",
                 status: "PLANNING",
                 priority: "MEDIUM",
-                start_date: "",
-                end_date: "",
+                startDate: "",
+                endDate: "",
                 team_members: [],
                 team_lead: "",
                 progress: 0,
@@ -134,11 +134,11 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm mb-1">Start Date</label>
-                            <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className="w-full px-3 py-2 rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 mt-1 text-zinc-900 dark:text-zinc-200 text-sm" />
+                            <input type="date" value={formData.startDate} onChange={(e) => setFormData({ ...formData, startDate: e.target.value })} className="w-full px-3 py-2 rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 mt-1 text-zinc-900 dark:text-zinc-200 text-sm" />
                         </div>
                         <div>
                             <label className="block text-sm mb-1">End Date</label>
-                            <input type="date" value={formData.end_date} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} min={formData.start_date && new Date(formData.start_date).toISOString().split('T')[0]} className="w-full px-3 py-2 rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 mt-1 text-zinc-900 dark:text-zinc-200 text-sm" />
+                            <input type="date" value={formData.endDate} onChange={(e) => setFormData({ ...formData, endDate: e.target.value })} min={formData.startDate && new Date(formData.startDate).toISOString().split('T')[0]} className="w-full px-3 py-2 rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 mt-1 text-zinc-900 dark:text-zinc-200 text-sm" />
                         </div>
                     </div>
 

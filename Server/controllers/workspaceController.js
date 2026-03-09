@@ -1,74 +1,275 @@
+/**
+ * Workspace Controller
+ * Handles workspace CRUD and member management
+ */
+
 import prisma from "../configs/prisma.js";
+import {
+  asyncHandler,
+  NotFoundError,
+  ConflictError,
+  AuthorizationError,
+} from "../utils/errors.js";
+import {
+  sendSuccess,
+  sendCreated,
+} from "../utils/response.js";
+import { ensureUserExists, getUserByEmail } from "../utils/userService.js";
+import { WORKSPACE_ROLES, LIMITS, ERROR_CODES } from "../utils/constants.js";
+import emailService from "../utils/emailService.js";
 
+/**
+ * Create a new workspace
+ * POST /api/v1/workspaces
+ * Body: { name, description? }
+ */
+export const createWorkspace = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { name, description } = req.body;
 
-//Get all workspaces for user
-export const getUserWorkspaces = async (req, res) => {
-    try {
-        const { userId } = await req.auth();
-        const workspaces = await prisma.workspace.findMany({
-            where: {
-                members: {some: {userId: userId}} 
-            },
+  // Ensure user exists in our database
+  await ensureUserExists(userId);
+
+  // Check user's workspace limit
+  const existingCount = await prisma.workspace.count({
+    where: { ownerId: userId },
+  });
+  
+  if (existingCount >= LIMITS.MAX_WORKSPACES_PER_USER) {
+    throw new ConflictError(
+      `Maximum ${LIMITS.MAX_WORKSPACES_PER_USER} workspaces allowed per user`,
+      ERROR_CODES.LIMIT_EXCEEDED
+    );
+  }
+
+  // Generate unique slug
+  const baseSlug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  const uniqueSlug = `${baseSlug}-${Date.now().toString(36)}`;
+
+  // Create workspace with owner as admin member
+  const workspace = await prisma.workspace.create({
+    data: {
+      id: `ws_${Date.now().toString(36)}`,
+      name,
+      slug: uniqueSlug,
+      description: description || null,
+      ownerId: userId,
+      members: {
+        create: {
+          userId,
+          role: WORKSPACE_ROLES.ADMIN,
+        },
+      },
+    },
+    include: {
+      members: { include: { user: true } },
+      projects: true,
+      owner: true,
+    },
+  });
+
+  sendCreated(res, workspace, 'Workspace created successfully');
+});
+
+/**
+ * Sync workspace from Clerk organization
+ * POST /api/v1/workspaces/sync
+ * Body: { id, name, slug, ownerId, image_url }
+ * Creates workspace using Clerk org ID if it doesn't exist
+ */
+export const syncWorkspace = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { id, name, slug, ownerId, image_url } = req.body;
+
+  // Ensure user exists in our database
+  await ensureUserExists(userId);
+
+  // Check if workspace already exists
+  const existing = await prisma.workspace.findUnique({
+    where: { id },
+    include: {
+      members: { include: { user: true } },
+      projects: true,
+      owner: true,
+    },
+  });
+
+  if (existing) {
+    return sendSuccess(res, existing, 'Workspace already exists');
+  }
+
+  // Create workspace with Clerk org ID
+  const workspace = await prisma.workspace.create({
+    data: {
+      id, // Use Clerk organization ID
+      name,
+      slug: slug || `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`,
+      ownerId: ownerId || userId,
+      image_url: image_url || null,
+      members: {
+        create: {
+          userId: ownerId || userId,
+          role: WORKSPACE_ROLES.ADMIN,
+        },
+      },
+    },
+    include: {
+      members: { include: { user: true } },
+      projects: true,
+      owner: true,
+    },
+  });
+
+  sendCreated(res, workspace, 'Workspace synced successfully');
+});
+
+/**
+ * Get all workspaces for authenticated user
+ * GET /api/v1/workspaces
+ */
+export const getUserWorkspaces = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+
+  const workspaces = await prisma.workspace.findMany({
+    where: {
+      members: { some: { userId } },
+    },
+    include: {
+      members: { include: { user: true } },
+      projects: {
+        include: {
+          tasks: {
             include: {
-                members: {include: {user: true}},
-                projects: {
-                    include: {
-                        tasks: {include: {assignee: true, comments: {include: {user: true}}}},
-                        members: {include: {user: true}}    
-                    }
-                },
-                owner: true,
-            }
-        });
-        res.json(workspaces);
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({ error: 'Failed to fetch workspaces', details: error.message });
-    }
-}
+              assignee: true,
+              comments: { include: { user: true } },
+            },
+          },
+          members: { include: { user: true } },
+        },
+      },
+      owner: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
 
-//ad member to workspace
-export const addMemberToWorkspace = async (req, res) => {
-    try {
-        const {userId} = await req.auth();
-        const {email, role ,workspaceId, message} = req.body;
-       //check if user exist
-       const user = await prisma.user.findUnique({where: {email}});
-       if(!user) {
-        return res.status(404).json({error: 'User not found'});
-       }
-       if(!workspaceId || !role) {
-        return res.status(400).json({error: 'Workspace ID and role are required'});
-       }
+  sendSuccess(res, workspaces);
+});
 
-       if(!['ADMIN', 'MEMBER'].includes(role)) {
-        return res.status(400).json({error: 'Invalid role. Must be ADMIN or MEMBER'});
-       }
-       //fetch workspace
-       const workspace = await prisma.workspace.findUnique({where: {id: workspaceId}, include: {members: true}});
-         if(!workspace) {
-            return res.status(404).json({error: 'Workspace not found'});
-         }
-         //check if requester is admin
-         if(!workspace.members.find((member) => member.userId === userId && member.role === 'ADMIN')) {
-            return res.status(403).json({error: 'Only workspace admins can add members'});
-         }
-            //check if user is already a member
-            const existingMember = workspace.members.find((member) => member.userId === user.id);
-            if(existingMember) {
-                return res.status(400).json({error: 'User is already a member of the workspace'});
-            }
+/**
+ * Add member to workspace
+ * POST /api/v1/workspaces/:workspaceId/members
+ * Body: { email, role, message? }
+ */
+export const addMemberToWorkspace = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { email, role, workspaceId, message } = req.body;
 
-            const member = await prisma.workspaceMember.create({
-                data: {
-                    userId: user.id,
-                    workspaceId,
-                    role,
-                    message,
-                }
-            });
-            res.json({member, message: 'Member added to workspace successfully'});
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({ error: 'Failed to add member to workspace', details: error.message });
-    }}
+  // Find user by email
+  const userToAdd = await getUserByEmail(email);
+  if (!userToAdd) {
+    throw new NotFoundError(
+      'User not found. They must sign up first before being invited.',
+      ERROR_CODES.USER_NOT_FOUND
+    );
+  }
+
+  // Fetch workspace with members
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    include: { members: true },
+  });
+
+  if (!workspace) {
+    throw new NotFoundError('Workspace not found', ERROR_CODES.WORKSPACE_NOT_FOUND);
+  }
+
+  // Check if requester is admin
+  const requesterMember = workspace.members.find(
+    (m) => m.userId === userId && m.role === WORKSPACE_ROLES.ADMIN
+  );
+  
+  if (!requesterMember) {
+    throw new AuthorizationError(
+      'Only workspace admins can add members',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
+
+  // Check if already a member
+  const existingMember = workspace.members.find((m) => m.userId === userToAdd.id);
+  if (existingMember) {
+    throw new ConflictError(
+      'User is already a member of this workspace',
+      ERROR_CODES.ALREADY_EXISTS
+    );
+  }
+
+  // Check member limit
+  if (workspace.members.length >= LIMITS.MAX_MEMBERS_PER_WORKSPACE) {
+    throw new ConflictError(
+      `Maximum ${LIMITS.MAX_MEMBERS_PER_WORKSPACE} members allowed per workspace`,
+      ERROR_CODES.LIMIT_EXCEEDED
+    );
+  }
+
+  // Add member
+  const member = await prisma.workspaceMember.create({
+    data: {
+      userId: userToAdd.id,
+      workspaceId,
+      role: role || WORKSPACE_ROLES.MEMBER,
+      message: message || null,
+    },
+    include: { user: true },
+  });
+
+  // Send notification email
+  const inviter = await prisma.user.findUnique({ where: { id: userId } });
+  emailService.sendWorkspaceInvite({
+    to: userToAdd.email,
+    inviteeName: userToAdd.name,
+    workspaceName: workspace.name,
+    inviterName: inviter?.name || 'A team member',
+    role: role || WORKSPACE_ROLES.MEMBER,
+  }).catch(err => console.error('[Email] Failed to send workspace invite:', err));
+
+  sendCreated(res, member, 'Member added to workspace successfully');
+});
+
+/**
+ * Delete a workspace
+ * DELETE /api/v1/workspaces/:workspaceId
+ * Only workspace owner can delete
+ */
+export const deleteWorkspace = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId } = req.params;
+
+  // Find workspace
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    include: { projects: { select: { id: true } } },
+  });
+
+  if (!workspace) {
+    throw new NotFoundError('Workspace not found', ERROR_CODES.WORKSPACE_NOT_FOUND);
+  }
+
+  // Only owner can delete workspace
+  if (workspace.ownerId !== userId) {
+    throw new AuthorizationError(
+      'Only the workspace owner can delete this workspace',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
+
+  // Delete workspace (cascades to members, projects, tasks via Prisma schema)
+  await prisma.workspace.delete({
+    where: { id: workspaceId },
+  });
+
+  sendSuccess(res, { id: workspaceId }, 'Workspace deleted successfully');
+});

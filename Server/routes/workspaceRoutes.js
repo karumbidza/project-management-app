@@ -1,13 +1,37 @@
+/**
+ * Workspace Routes
+ * /api/v1/workspaces
+ */
+
 import express from "express";
 import { 
-    getUserWorkspaces, 
-    addMemberToWorkspace
+  getUserWorkspaces, 
+  createWorkspace,
+  syncWorkspace,
+  addMemberToWorkspace,
+  deleteWorkspace,
 } from "../controllers/workspaceController.js";
+import { validate, createWorkspaceSchema, addWorkspaceMemberSchema } from "../utils/validators.js";
 
 const workspaceRouter = express.Router();
 
-// Workspace routes
+// GET /api/v1/workspaces - Get all workspaces for user
 workspaceRouter.get("/", getUserWorkspaces);
-workspaceRouter.post("/add-member", addMemberToWorkspace);
+
+// POST /api/v1/workspaces - Create new workspace
+workspaceRouter.post("/", validate(createWorkspaceSchema), createWorkspace);
+
+// POST /api/v1/workspaces/sync - Sync workspace from Clerk org
+workspaceRouter.post("/sync", syncWorkspace);
+
+// DELETE /api/v1/workspaces/:workspaceId - Delete workspace (owner only)
+workspaceRouter.delete("/:workspaceId", deleteWorkspace);
+
+// POST /api/v1/workspaces/add-member - Add member to workspace
+workspaceRouter.post(
+  "/add-member", 
+  validate(addWorkspaceMemberSchema), 
+  addMemberToWorkspace
+);
 
 export default workspaceRouter;

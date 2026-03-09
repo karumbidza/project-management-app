@@ -1,10 +1,22 @@
-import { format } from "date-fns";
+import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CalendarIcon, MessageCircle, PenIcon } from "lucide-react";
-import { assets } from "../assets/assets";
+import { CalendarIcon, MessageCircle, PenIcon, User } from "lucide-react";
+import { useUser, useAuth } from "@clerk/clerk-react";
+import { addCommentAsync, updateTaskAsync } from "../features/workspaceSlice";
+
+// Safe date formatter
+const formatDate = (dateValue, formatStr = "dd MMM yyyy") => {
+    if (!dateValue) return "-";
+    try {
+        const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
+        return isValid(date) ? format(date, formatStr) : "-";
+    } catch {
+        return "-";
+    }
+};
 
 const TaskDetails = () => {
 
@@ -12,28 +24,33 @@ const TaskDetails = () => {
     const projectId = searchParams.get("projectId");
     const taskId = searchParams.get("taskId");
 
-    const user = { id : 'user_1'}
+    const { user } = useUser();
+    const { getToken } = useAuth();
+    const dispatch = useDispatch();
+    
     const [task, setTask] = useState(null);
     const [project, setProject] = useState(null);
-    const [comments, setComments] = useState([]);
     const [newComment, setNewComment] = useState("");
     const [loading, setLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const { currentWorkspace } = useSelector((state) => state.workspace);
 
-    const fetchComments = async () => {
-
-    };
-
     const fetchTaskDetails = async () => {
         setLoading(true);
-        if (!projectId || !taskId) return;
+        if (!projectId || !taskId || !currentWorkspace) return;
 
-        const proj = currentWorkspace.projects.find((p) => p.id === projectId);
-        if (!proj) return;
+        const proj = currentWorkspace.projects?.find((p) => p.id === projectId);
+        if (!proj) {
+            setLoading(false);
+            return;
+        }
 
-        const tsk = proj.tasks.find((t) => t.id === taskId);
-        if (!tsk) return;
+        const tsk = proj.tasks?.find((t) => t.id === taskId);
+        if (!tsk) {
+            setLoading(false);
+            return;
+        }
 
         setTask(tsk);
         setProject(proj);
@@ -41,37 +58,35 @@ const TaskDetails = () => {
     };
 
     const handleAddComment = async () => {
-        if (!newComment.trim()) return;
+        if (!newComment.trim() || isSubmitting) return;
 
+        setIsSubmitting(true);
         try {
-
-            toast.loading("Adding comment...");
-
-            //  Simulate API call
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-
-            const dummyComment = { id: Date.now(), user: { id: 1, name: "User", image: assets.profile_img_a }, content: newComment, createdAt: new Date() };
+            await dispatch(addCommentAsync({
+                taskId,
+                content: newComment.trim(),
+                getToken,
+            })).unwrap();
             
-            setComments((prev) => [...prev, dummyComment]);
             setNewComment("");
-            toast.dismissAll();
-            toast.success("Comment added.");
+            toast.success("Comment added!");
+            // Refresh task details to get updated comments
+            fetchTaskDetails();
         } catch (error) {
-            toast.dismissAll();
-            toast.error(error?.response?.data?.message || error.message);
-            console.error(error);
+            toast.error(error || "Failed to add comment");
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
-    useEffect(() => { fetchTaskDetails(); }, [taskId]);
-
-    useEffect(() => {
-        if (taskId && task) {
-            fetchComments();
-            const interval = setInterval(() => { fetchComments(); }, 10000);
-            return () => clearInterval(interval);
+    useEffect(() => { 
+        if (currentWorkspace) {
+            fetchTaskDetails(); 
         }
-    }, [taskId, task]);
+    }, [taskId, currentWorkspace]);
+
+    // Get comments from task
+    const comments = task?.comments || [];
 
     if (loading) return <div className="text-gray-500 dark:text-zinc-400 px-4 py-6">Loading task details...</div>;
     if (!task) return <div className="text-red-500 px-4 py-6">Task not found.</div>;
@@ -89,10 +104,16 @@ const TaskDetails = () => {
                         {comments.length > 0 ? (
                             <div className="flex flex-col gap-4 mb-6 mr-2">
                                 {comments.map((comment) => (
-                                    <div key={comment.id} className={`sm:max-w-4/5 dark:bg-gradient-to-br dark:from-zinc-800 dark:to-zinc-900 border border-gray-300 dark:border-zinc-700 p-3 rounded-md ${comment.user.id === user?.id ? "ml-auto" : "mr-auto"}`} >
+                                    <div key={comment.id} className={`sm:max-w-4/5 dark:bg-gradient-to-br dark:from-zinc-800 dark:to-zinc-900 border border-gray-300 dark:border-zinc-700 p-3 rounded-md ${comment.userId === user?.id ? "ml-auto" : "mr-auto"}`} >
                                         <div className="flex items-center gap-2 mb-1 text-sm text-gray-500 dark:text-zinc-400">
-                                            <img src={comment.user.image} alt="avatar" className="size-5 rounded-full" />
-                                            <span className="font-medium text-gray-900 dark:text-white">{comment.user.name}</span>
+                                            {comment.user?.image ? (
+                                                <img src={comment.user.image} alt="avatar" className="size-5 rounded-full" />
+                                            ) : (
+                                                <div className="size-5 rounded-full bg-blue-500 flex items-center justify-center">
+                                                    <User className="w-3 h-3 text-white" />
+                                                </div>
+                                            )}
+                                            <span className="font-medium text-gray-900 dark:text-white">{comment.user?.name || 'Unknown'}</span>
                                             <span className="text-xs text-gray-400 dark:text-zinc-600">
                                                 • {format(new Date(comment.createdAt), "dd MMM yyyy, HH:mm")}
                                             </span>
@@ -114,9 +135,14 @@ const TaskDetails = () => {
                             placeholder="Write a comment..."
                             className="w-full dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-md p-2 text-sm text-gray-900 dark:text-zinc-200 resize-none focus:outline-none focus:ring-1 focus:ring-blue-600"
                             rows={3}
+                            disabled={isSubmitting}
                         />
-                        <button onClick={handleAddComment} className="bg-gradient-to-l from-blue-500 to-blue-600 transition-colors text-white text-sm px-5 py-2 rounded " >
-                            Post
+                        <button 
+                            onClick={handleAddComment} 
+                            disabled={isSubmitting || !newComment.trim()}
+                            className="bg-gradient-to-l from-blue-500 to-blue-600 transition-colors text-white text-sm px-5 py-2 rounded disabled:opacity-50" 
+                        >
+                            {isSubmitting ? 'Posting...' : 'Post'}
                         </button>
                     </div>
                 </div>
@@ -154,7 +180,7 @@ const TaskDetails = () => {
                         </div>
                         <div className="flex items-center gap-2">
                             <CalendarIcon className="size-4 text-gray-500 dark:text-zinc-500" />
-                            Due : {format(new Date(task.due_date), "dd MMM yyyy")}
+                            Due : {formatDate(task.dueDate || task.plannedEndDate)}
                         </div>
                     </div>
                 </div>
@@ -164,7 +190,7 @@ const TaskDetails = () => {
                     <div className="p-4 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 border border-gray-300 dark:border-zinc-800 ">
                         <p className="text-xl font-medium mb-4">Project Details</p>
                         <h2 className="text-gray-900 dark:text-zinc-100 flex items-center gap-2"> <PenIcon className="size-4" /> {project.name}</h2>
-                        <p className="text-xs mt-3">Project Start Date: {format(new Date(project.start_date), "dd MMM yyyy")}</p>
+                        <p className="text-xs mt-3">Project Start Date: {formatDate(project.startDate)}</p>
                         <div className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-zinc-400 mt-3">
                             <span>Status: {project.status}</span>
                             <span>Priority: {project.priority}</span>

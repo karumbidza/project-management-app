@@ -1,25 +1,62 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Check, Plus } from "lucide-react";
-import { useDispatch, useSelector } from "react-redux";
-import { setCurrentWorkspace } from "../features/workspaceSlice";
+import { ChevronDown, Check, Plus, Building2, Trash2, Loader2 } from "lucide-react";
+import { useDispatch, useSelector, shallowEqual } from "react-redux";
+import { setCurrentWorkspace, deleteWorkspaceAsync } from "../features/workspaceSlice";
 import { useNavigate } from "react-router-dom";
-import { dummyWorkspaces } from "../assets/assets";
+import { useAuth, useOrganizationList } from "@clerk/clerk-react";
+import CreateWorkspaceDialog from "./CreateWorkspaceDialog";
+import toast from "react-hot-toast";
 
 function WorkspaceDropdown() {
 
     const { workspaces } = useSelector((state) => state.workspace);
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
+    const loading = useSelector(
+        (state) => state.workspace?.loadingStates?.workspaces ?? false,
+        shallowEqual
+    );
     const [isOpen, setIsOpen] = useState(false);
+    const [showCreateDialog, setShowCreateDialog] = useState(false);
+    const [deleteConfirm, setDeleteConfirm] = useState(null); // workspace id to confirm delete
     const dropdownRef = useRef(null);
 
     const dispatch = useDispatch();
     const navigate = useNavigate();
+    const { getToken, userId } = useAuth();
+    const { setActive } = useOrganizationList();
 
-    const onSelectWorkspace = (organizationId) => {
-        dispatch(setCurrentWorkspace(organizationId))
+    const onSelectWorkspace = async (organizationId) => {
+        // Set both Clerk's active organization AND our Redux state
+        try {
+            await setActive?.({ organization: organizationId });
+        } catch (e) {
+            // Organization might not exist in Clerk yet (legacy workspace)
+            console.log('Could not set Clerk org:', e);
+        }
+        dispatch(setCurrentWorkspace(organizationId));
         setIsOpen(false);
-        navigate('/')
+        navigate('/');
     }
+
+    const handleDeleteWorkspace = async (e, ws) => {
+        e.stopPropagation();
+        
+        if (deleteConfirm !== ws.id) {
+            setDeleteConfirm(ws.id);
+            return;
+        }
+
+        try {
+            await dispatch(deleteWorkspaceAsync({ workspaceId: ws.id, getToken })).unwrap();
+            toast.success(`Workspace "${ws.name}" deleted`);
+            setDeleteConfirm(null);
+            if (workspaces.length <= 1) {
+                navigate('/');
+            }
+        } catch (error) {
+            toast.error(error || 'Failed to delete workspace');
+        }
+    };
 
     // Close dropdown on outside click
     useEffect(() => {
@@ -33,10 +70,17 @@ function WorkspaceDropdown() {
     }, []);
 
     return (
+        <>
         <div className="relative m-4" ref={dropdownRef}>
             <button onClick={() => setIsOpen(prev => !prev)} className="w-full flex items-center justify-between p-3 h-auto text-left rounded hover:bg-gray-100 dark:hover:bg-zinc-800" >
                 <div className="flex items-center gap-3">
-                    <img src={currentWorkspace?.image_url} alt={currentWorkspace?.name} className="w-8 h-8 rounded shadow" />
+                    {currentWorkspace?.image_url ? (
+                        <img src={currentWorkspace.image_url} alt={currentWorkspace?.name} className="w-8 h-8 rounded shadow" />
+                    ) : (
+                        <div className="w-8 h-8 rounded shadow bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                            <Building2 className="w-4 h-4 text-white" />
+                        </div>
+                    )}
                     <div className="min-w-0 flex-1">
                         <p className="font-semibold text-gray-800 dark:text-white text-sm truncate">
                             {currentWorkspace?.name || "Select Workspace"}
@@ -55,27 +99,66 @@ function WorkspaceDropdown() {
                         <p className="text-xs text-gray-500 dark:text-zinc-400 uppercase tracking-wider mb-2 px-2">
                             Workspaces
                         </p>
-                        {dummyWorkspaces.map((ws) => (
-                            <div key={ws.id} onClick={() => onSelectWorkspace(ws.id)} className="flex items-center gap-3 p-2 cursor-pointer rounded hover:bg-gray-100 dark:hover:bg-zinc-800" >
-                                <img src={ws.image_url} alt={ws.name} className="w-6 h-6 rounded" />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                                        {ws.name}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-zinc-400 truncate">
-                                        {ws.membersCount || 0} members
-                                    </p>
+                        {workspaces.length === 0 ? (
+                            <p className="text-sm text-gray-500 dark:text-zinc-400 px-2 py-4 text-center">
+                                No workspaces yet
+                            </p>
+                        ) : (
+                            workspaces.map((ws) => (
+                                <div key={ws.id} className="flex items-center gap-2 p-2 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 group">
+                                    <div 
+                                        onClick={() => onSelectWorkspace(ws.id)} 
+                                        className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                                    >
+                                        {ws.image_url ? (
+                                            <img src={ws.image_url} alt={ws.name} className="w-6 h-6 rounded" />
+                                        ) : (
+                                            <div className="w-6 h-6 rounded bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                                <Building2 className="w-3 h-3 text-white" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                                {ws.name}
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-zinc-400 truncate">
+                                                {ws.members?.length || 0} members
+                                            </p>
+                                        </div>
+                                        {currentWorkspace?.id === ws.id && (
+                                            <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                        )}
+                                    </div>
+                                    {/* Delete button - only show for workspaces user owns */}
+                                    {ws.ownerId === userId && (
+                                        <button
+                                            onClick={(e) => handleDeleteWorkspace(e, ws)}
+                                            disabled={loading}
+                                            className={`p-1.5 rounded transition-colors flex-shrink-0 ${
+                                                deleteConfirm === ws.id
+                                                    ? 'bg-red-500 text-white'
+                                                    : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'
+                                            }`}
+                                            title={deleteConfirm === ws.id ? 'Click again to confirm' : 'Delete workspace'}
+                                        >
+                                            {loading && deleteConfirm === ws.id ? (
+                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            )}
+                                        </button>
+                                    )}
                                 </div>
-                                {currentWorkspace?.id === ws.id && (
-                                    <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                                )}
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
 
                     <hr className="border-gray-200 dark:border-zinc-700" />
 
-                    <div className="p-2 cursor-pointer rounded group hover:bg-gray-100 dark:hover:bg-zinc-800" >
+                    <div 
+                        onClick={() => { setShowCreateDialog(true); setIsOpen(false); }}
+                        className="p-2 cursor-pointer rounded group hover:bg-gray-100 dark:hover:bg-zinc-800"
+                    >
                         <p className="flex items-center text-xs gap-2 my-1 w-full text-blue-600 dark:text-blue-400 group-hover:text-blue-500 dark:group-hover:text-blue-300">
                             <Plus className="w-4 h-4" /> Create Workspace
                         </p>
@@ -83,6 +166,12 @@ function WorkspaceDropdown() {
                 </div>
             )}
         </div>
+        
+        <CreateWorkspaceDialog 
+            isOpen={showCreateDialog} 
+            onClose={() => setShowCreateDialog(false)} 
+        />
+        </>
     );
 }
 

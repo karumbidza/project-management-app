@@ -1,16 +1,21 @@
-import { useState, useEffect } from "react";
-import { useSelector } from "react-redux";
+import { useState, useMemo } from "react";
+import { useSelector, shallowEqual } from "react-redux";
 import { Plus, Search, FolderOpen } from "lucide-react";
 import ProjectCard from "../components/ProjectCard";
 import CreateProjectDialog from "../components/CreateProjectDialog";
+import useUserRole from "../hooks/useUserRole";
+
+// Stable empty array to prevent selector re-renders
+const EMPTY_ARRAY = [];
 
 export default function Projects() {
+    const { canCreateProjects } = useUserRole();
     
     const projects = useSelector(
-        (state) => state?.workspace?.currentWorkspace?.projects || []
+        (state) => state?.workspace?.currentWorkspace?.projects ?? EMPTY_ARRAY,
+        shallowEqual
     );
 
-    const [filteredProjects, setFilteredProjects] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [filters, setFilters] = useState({
@@ -18,13 +23,14 @@ export default function Projects() {
         priority: "ALL",
     });
 
-    const filterProjects = () => {
+    // Use useMemo for derived state instead of useState + useEffect
+    const filteredProjects = useMemo(() => {
         let filtered = projects;
 
         if (searchTerm) {
             filtered = filtered.filter(
                 (project) =>
-                    project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    project.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                     project.description?.toLowerCase().includes(searchTerm.toLowerCase())
             );
         }
@@ -39,11 +45,7 @@ export default function Projects() {
             );
         }
 
-        setFilteredProjects(filtered);
-    };
-
-    useEffect(() => {
-        filterProjects();
+        return filtered;
     }, [projects, searchTerm, filters]);
 
     return (
@@ -54,9 +56,11 @@ export default function Projects() {
                     <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white mb-1"> Projects </h1>
                     <p className="text-gray-500 dark:text-zinc-400 text-sm"> Manage and track your projects </p>
                 </div>
-                <button onClick={() => setIsDialogOpen(true)} className="flex items-center px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 text-white hover:opacity-90 transition" >
-                    <Plus className="size-4 mr-2" /> New Project
-                </button>
+                {canCreateProjects && (
+                    <button onClick={() => setIsDialogOpen(true)} className="flex items-center px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 text-white hover:opacity-90 transition" >
+                        <Plus className="size-4 mr-2" /> New Project
+                    </button>
+                )}
                 <CreateProjectDialog isDialogOpen={isDialogOpen} setIsDialogOpen={setIsDialogOpen} />
             </div>
 
@@ -101,7 +105,7 @@ export default function Projects() {
                         </button>
                     </div>
                 ) : (
-                    filteredProjects.map((project) => (
+                    filteredProjects.filter(p => p?.id).map((project) => (
                         <ProjectCard key={project.id} project={project} />
                     ))
                 )}

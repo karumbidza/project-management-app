@@ -8,14 +8,27 @@ datasource db {
     directUrl = env("DIRECT_URL")
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENUMS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 enum WorkspaceRole {
     ADMIN
     MEMBER
 }
 
+enum ProjectRole {
+    OWNER
+    MANAGER
+    CONTRIBUTOR
+    VIEWER
+}
+
 enum TaskStatus {
     TODO
     IN_PROGRESS
+    BLOCKED
+    IN_REVIEW
     DONE
 }
 
@@ -24,6 +37,7 @@ enum TaskType {
     BUG
     FEATURE
     IMPROVEMENT
+    MILESTONE
     OTHER
 }
 
@@ -39,7 +53,44 @@ enum Priority {
     LOW
     MEDIUM
     HIGH
+    CRITICAL
 }
+
+enum NotificationType {
+    TASK_ASSIGNED
+    TASK_UPDATED
+    TASK_STARTING_SOON
+    TASK_OVERDUE
+    PREDECESSOR_COMPLETE
+    COMMENT_ADDED
+    PROJECT_INVITE
+    DELAY_ALERT
+}
+
+enum InviteStatus {
+    PENDING
+    ACCEPTED
+    EXPIRED
+    CANCELLED
+}
+
+enum ActivityType {
+    TASK_CREATED
+    TASK_UPDATED
+    STATUS_CHANGED
+    ASSIGNEE_CHANGED
+    DUE_DATE_CHANGED
+    DELAY_REPORTED
+    COMMENT_ADDED
+    DEPENDENCY_ADDED
+    DEPENDENCY_REMOVED
+    HANDOFF_INITIATED
+    HANDOFF_COMPLETED
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// USER MODEL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 model User {
     id        String   @id
@@ -49,13 +100,26 @@ model User {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
-    workspaces      WorkspaceMember[]
-    projects        Project[]         @relation("ProjectOwner")
-    tasks           Task[]            @relation("TaskAssignee")
-    comments        Comment[]
-    ownedWorkspaces Workspace[]
-    ProjectMember   ProjectMember[]
+    // Relations
+    workspaces       WorkspaceMember[]
+    projectsOwned    Project[]         @relation("ProjectOwner")
+    projectMembers   ProjectMember[]
+    tasksAssigned    Task[]            @relation("TaskAssignee")
+    tasksCreated     Task[]            @relation("TaskCreator")
+    comments         Comment[]
+    ownedWorkspaces  Workspace[]
+    activities       TaskActivity[]
+    notifications    Notification[]
+    invitationsSent  Invitation[]      @relation("InvitedBy")
+
+    // Indexes for query performance
+    @@index([email])
+    @@index([createdAt])
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WORKSPACE MODELS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 model Workspace {
     id          String   @id
@@ -68,9 +132,14 @@ model Workspace {
     image_url   String   @default("")
     updatedAt   DateTime @updatedAt
 
+    // Relations
     members  WorkspaceMember[]
     projects Project[]
     owner    User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+    // Indexes
+    @@index([ownerId])
+    @@index([slug])
 }
 
 model WorkspaceMember {
@@ -79,41 +148,71 @@ model WorkspaceMember {
     workspaceId String
     message     String        @default("")
     role        WorkspaceRole @default(MEMBER)
-    user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-    workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+    joinedAt    DateTime      @default(now())
 
-    @@unique([userId, workspaceId]) // prevent duplicate membership
+    // Relations
+    user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+    // Constraints & Indexes
+    @@unique([userId, workspaceId])
+    @@index([workspaceId])
+    @@index([userId])
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROJECT MODELS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 model Project {
-    id          String          @id @default(uuid())
+    id          String        @id @default(uuid())
     name        String
     description String?
-    priority    Priority        @default(MEDIUM)
-    status      ProjectStatus   @default(ACTIVE)
-    start_date  DateTime?
-    end_date    DateTime?
-    team_lead   String
+    priority    Priority      @default(MEDIUM)
+    status      ProjectStatus @default(ACTIVE)
+    startDate   DateTime?
+    endDate     DateTime?
+    ownerId     String
     workspaceId String
-    progress    Int             @default(0)
-    createdAt   DateTime        @default(now())
-    updatedAt   DateTime        @updatedAt
-    members     ProjectMember[]
+    progress    Int           @default(0)
+    budget      Decimal?      @db.Decimal(12, 2)
+    createdAt   DateTime      @default(now())
+    updatedAt   DateTime      @updatedAt
 
-    owner     User      @relation("ProjectOwner", fields: [team_lead], references: [id], onDelete: Cascade)
-    workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-    tasks     Task[]
+    // Relations
+    owner       User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+    workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+    members     ProjectMember[]
+    tasks       Task[]
+    invitations Invitation[]
+
+    // Indexes
+    @@index([workspaceId])
+    @@index([ownerId])
+    @@index([status])
+    @@index([createdAt])
 }
 
 model ProjectMember {
-    id        String  @id @default(uuid())
+    id        String      @id @default(uuid())
     userId    String
     projectId String
-    user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-    project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+    role      ProjectRole @default(CONTRIBUTOR)
+    joinedAt  DateTime    @default(now())
 
-    @@unique([userId, projectId]) // prevent duplicate membership
+    // Relations
+    user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+    // Constraints & Indexes
+    @@unique([userId, projectId])
+    @@index([projectId])
+    @@index([userId])
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TASK MODELS (with dependencies)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 model Task {
     id          String     @id @default(uuid())
@@ -123,14 +222,89 @@ model Task {
     status      TaskStatus @default(TODO)
     type        TaskType   @default(TASK)
     priority    Priority   @default(MEDIUM)
+    
+    // Assignment
     assigneeId  String
-    due_date    DateTime
-    createdAt   DateTime   @default(now())
-    updatedAt   DateTime   @updatedAt
+    createdById String
+    
+    // Scheduling - Planned vs Actual
+    plannedStartDate DateTime?
+    plannedEndDate   DateTime?
+    actualStartDate  DateTime?
+    actualEndDate    DateTime?
+    dueDate          DateTime
+    
+    // Delay Tracking
+    isDelayed     Boolean @default(false)
+    delayDays     Int     @default(0)
+    delayReason   String?
+    
+    // Task ordering for Gantt/timeline
+    sortOrder     Int     @default(0)
+    
+    // Timestamps
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 
-    project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-    assignee User      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
-    comments Comment[]
+    // Relations
+    project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+    assignee     User           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+    createdBy    User           @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
+    comments     Comment[]
+    activities   TaskActivity[]
+    
+    // Task Dependencies (self-referential)
+    predecessors TaskDependency[] @relation("TaskSuccessor")
+    successors   TaskDependency[] @relation("TaskPredecessor")
+
+    // Indexes for performance
+    @@index([projectId])
+    @@index([assigneeId])
+    @@index([status])
+    @@index([dueDate])
+    @@index([isDelayed])
+    @@index([createdAt])
+}
+
+model TaskDependency {
+    id            String   @id @default(uuid())
+    predecessorId String
+    successorId   String
+    lagDays       Int      @default(0)  // Days between predecessor end and successor start
+    createdAt     DateTime @default(now())
+
+    // Relations
+    predecessor Task @relation("TaskPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+    successor   Task @relation("TaskSuccessor", fields: [successorId], references: [id], onDelete: Cascade)
+
+    // Constraints
+    @@unique([predecessorId, successorId])
+    @@index([predecessorId])
+    @@index([successorId])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ACTIVITY & AUDIT TRAIL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model TaskActivity {
+    id        String       @id @default(uuid())
+    taskId    String
+    userId    String
+    type      ActivityType
+    message   String
+    metadata  Json         @default("{}")  // Store old/new values for audit
+    createdAt DateTime     @default(now())
+
+    // Relations
+    task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Indexes
+    @@index([taskId])
+    @@index([userId])
+    @@index([type])
+    @@index([createdAt])
 }
 
 model Comment {
@@ -139,7 +313,67 @@ model Comment {
     userId    String
     taskId    String
     createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 
+    // Relations
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
     task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+    // Indexes
+    @@index([taskId])
+    @@index([userId])
+    @@index([createdAt])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// NOTIFICATIONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model Notification {
+    id        String           @id @default(uuid())
+    userId    String
+    type      NotificationType
+    title     String
+    message   String
+    metadata  Json             @default("{}")  // Store related IDs (taskId, projectId, etc.)
+    isRead    Boolean          @default(false)
+    readAt    DateTime?
+    createdAt DateTime         @default(now())
+
+    // Relations
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    // Indexes
+    @@index([userId])
+    @@index([isRead])
+    @@index([createdAt])
+    @@index([type])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVITATIONS (for inviting new users)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model Invitation {
+    id          String       @id @default(uuid())
+    email       String
+    projectId   String
+    role        ProjectRole  @default(CONTRIBUTOR)
+    status      InviteStatus @default(PENDING)
+    invitedById String
+    token       String       @unique @default(uuid())
+    message     String?
+    expiresAt   DateTime
+    createdAt   DateTime     @default(now())
+    acceptedAt  DateTime?
+
+    // Relations
+    project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+    invitedBy User    @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+    // Indexes
+    @@unique([email, projectId])
+    @@index([email])
+    @@index([token])
+    @@index([status])
 }

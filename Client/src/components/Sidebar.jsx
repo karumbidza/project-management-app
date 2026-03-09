@@ -3,15 +3,26 @@ import { NavLink } from 'react-router-dom'
 import MyTasksSidebar from './MyTasksSidebar'
 import ProjectSidebar from './ProjectsSidebar'
 import WorkspaceDropdown from './WorkspaceDropdown'
-import { FolderOpenIcon, LayoutDashboardIcon, SettingsIcon, UsersIcon } from 'lucide-react'
+import { BarChart3, FolderOpenIcon, LayoutDashboardIcon, SettingsIcon, UsersIcon } from 'lucide-react'
+import useUserRole from '../hooks/useUserRole'
 
 const Sidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
+    const { isAdmin, canViewReports, canManageMembers } = useUserRole();
 
-    const menuItems = [
+    // Base menu items - visible to all
+    const baseMenuItems = [
         { name: 'Dashboard', href: '/', icon: LayoutDashboardIcon },
         { name: 'Projects', href: '/projects', icon: FolderOpenIcon },
-        { name: 'Team', href: '/team', icon: UsersIcon },
-    ]
+    ];
+
+    // Admin-only menu items
+    const adminMenuItems = [
+        ...(canManageMembers ? [{ name: 'Team', href: '/team', icon: UsersIcon }] : []),
+        ...(canViewReports ? [{ name: 'Reports', href: '/reports', icon: BarChart3 }] : []),
+        ...(isAdmin ? [{ name: 'Settings', href: '/settings', icon: SettingsIcon }] : []),
+    ];
+
+    const menuItems = [...baseMenuItems, ...adminMenuItems];
 
     const sidebarRef = useRef(null);
 
@@ -38,10 +49,6 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
                                 <p className='text-sm truncate'>{item.name}</p>
                             </NavLink>
                         ))}
-                        <button className='flex w-full items-center gap-3 py-2 px-4 text-gray-800 dark:text-zinc-100 cursor-pointer rounded hover:bg-gray-50 dark:hover:bg-zinc-800/60 transition-all'>
-                            <SettingsIcon size={16} />
-                            <p className='text-sm truncate'>Settings</p>
-                        </button>
                     </div>
                     <MyTasksSidebar />
                     <ProjectSidebar />

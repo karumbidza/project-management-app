@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { format, isSameDay, isBefore, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths } from "date-fns";
-import { CalendarIcon, Clock, User, ChevronLeft, ChevronRight } from "lucide-react";
+import { format, isSameDay, isBefore, isWithinInterval, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, parseISO } from "date-fns";
+import { CalendarIcon, Clock, User, ChevronLeft, ChevronRight, GanttChart } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 const typeColors = {
     BUG: "bg-red-200 text-red-800 dark:bg-red-500 dark:text-red-900",
@@ -19,16 +20,64 @@ const priorityBorders = {
 const ProjectCalendar = ({ tasks }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [currentMonth, setCurrentMonth] = useState(new Date());
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const today = new Date();
-    const getTasksForDate = (date) => tasks.filter((task) => isSameDay(task.due_date, date));
+    
+    // Helper to safely parse dates
+    const parseTaskDate = (dateValue) => {
+        if (!dateValue) return null;
+        try {
+            const date = typeof dateValue === 'string' ? parseISO(dateValue) : new Date(dateValue);
+            return isNaN(date.getTime()) ? null : date;
+        } catch {
+            return null;
+        }
+    };
+
+    // Get tasks for a specific date - now checks if date falls within task's date range
+    const getTasksForDate = (date) => tasks.filter((task) => {
+        const startDate = parseTaskDate(task.plannedStartDate);
+        const endDate = parseTaskDate(task.plannedEndDate) || parseTaskDate(task.dueDate);
+        const dueDate = parseTaskDate(task.dueDate);
+        
+        // If task has date range, check if selected date is within range
+        if (startDate && endDate) {
+            return isWithinInterval(date, { start: startDate, end: endDate });
+        }
+        
+        // Fall back to due date only
+        if (dueDate) {
+            return isSameDay(dueDate, date);
+        }
+        
+        return false;
+    });
+
+    // Navigate to Gantt view
+    const goToGantt = () => {
+        setSearchParams(params => {
+            params.set('tab', 'gantt');
+            return params;
+        });
+    };
 
     const upcomingTasks = tasks
-        .filter((task) => task.due_date && !isBefore(task.due_date, today) && task.status !== "DONE")
-        .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+        .filter((task) => {
+            const dueDate = parseTaskDate(task.dueDate) || parseTaskDate(task.plannedEndDate);
+            return dueDate && !isBefore(dueDate, today) && task.status !== "DONE";
+        })
+        .sort((a, b) => {
+            const dateA = parseTaskDate(a.dueDate) || parseTaskDate(a.plannedEndDate);
+            const dateB = parseTaskDate(b.dueDate) || parseTaskDate(b.plannedEndDate);
+            return dateA - dateB;
+        })
         .slice(0, 5);
 
-    const overdueTasks = tasks.filter((task) => task.due_date && isBefore(task.due_date, today) && task.status !== "DONE");
+    const overdueTasks = tasks.filter((task) => {
+        const dueDate = parseTaskDate(task.dueDate) || parseTaskDate(task.plannedEndDate);
+        return dueDate && isBefore(dueDate, today) && task.status !== "DONE";
+    });
 
     const daysInMonth = eachDayOfInterval({
         start: startOfMonth(currentMonth),
@@ -93,32 +142,55 @@ const ProjectCalendar = ({ tasks }) => {
                 {/* Tasks for Selected Day */}
                 {getTasksForDate(selectedDate).length > 0 && (
                     <div className=" not-dark:bg-white mt-6 dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-4">
-                        <h3 className="text-zinc-900 dark:text-white text-lg mb-3">
-                            Tasks for {format(selectedDate, "MMM d, yyyy")}
-                        </h3>
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-zinc-900 dark:text-white text-lg">
+                                Tasks for {format(selectedDate, "MMM d, yyyy")}
+                            </h3>
+                            <button 
+                                onClick={goToGantt}
+                                className="flex items-center gap-1 text-sm text-blue-500 hover:text-blue-600 transition"
+                            >
+                                <GanttChart className="w-4 h-4" />
+                                View in Gantt
+                            </button>
+                        </div>
                         <div className="space-y-3">
-                            {getTasksForDate(selectedDate).map((task) => (
-                                <div
-                                    key={task.id}
-                                    className={`bg-zinc-50 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition p-4 rounded border-l-4 ${priorityBorders[task.priority]}`}
-                                >
-                                    <div className="flex justify-between mb-2">
-                                        <h4 className="text-zinc-900 dark:text-white font-medium">{task.title}</h4>
-                                        <span className={`px-2 py-0.5 rounded text-xs ${typeColors[task.type]}`}>
-                                            {task.type}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                                        <span className="capitalize">{task.priority.toLowerCase()} priority</span>
-                                        {task.assignee && (
-                                            <span className="flex items-center gap-1">
-                                                <User className="w-3 h-3" />
-                                                {task.assignee.name}
+                            {getTasksForDate(selectedDate).map((task) => {
+                                const startDate = parseTaskDate(task.plannedStartDate);
+                                const endDate = parseTaskDate(task.plannedEndDate) || parseTaskDate(task.dueDate);
+                                const hasDateRange = startDate && endDate && !isSameDay(startDate, endDate);
+                                
+                                return (
+                                    <div
+                                        key={task.id}
+                                        className={`bg-zinc-50 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition p-4 rounded border-l-4 ${priorityBorders[task.priority]}`}
+                                    >
+                                        <div className="flex justify-between mb-2">
+                                            <h4 className="text-zinc-900 dark:text-white font-medium">{task.title}</h4>
+                                            <span className={`px-2 py-0.5 rounded text-xs ${typeColors[task.type]}`}>
+                                                {task.type}
                                             </span>
-                                        )}
+                                        </div>
+                                        <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                                            <div className="flex items-center gap-3">
+                                                <span className="capitalize">{task.priority.toLowerCase()} priority</span>
+                                                {hasDateRange && (
+                                                    <span className="flex items-center gap-1 text-blue-500">
+                                                        <CalendarIcon className="w-3 h-3" />
+                                                        {format(startDate, "MMM d")} - {format(endDate, "MMM d")}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {task.assignee && (
+                                                <span className="flex items-center gap-1">
+                                                    <User className="w-3 h-3" />
+                                                    {task.assignee.name}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -135,20 +207,29 @@ const ProjectCalendar = ({ tasks }) => {
                         <p className="text-zinc-500 dark:text-zinc-400 text-sm text-center">No upcoming tasks</p>
                     ) : (
                         <div className="space-y-2">
-                            {upcomingTasks.map((task) => (
-                                <div
-                                    key={task.id}
-                                    className="bg-zinc-50 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800 p-3 rounded-lg transition"
-                                >
-                                    <div className="flex justify-between items-start text-sm">
-                                        <span className="text-zinc-900 dark:text-white">{task.title}</span>
-                                        <span className={`text-xs px-2 py-0.5 rounded ${typeColors[task.type]}`}>
-                                            {task.type}
-                                        </span>
+                            {upcomingTasks.map((task) => {
+                                const dueDate = parseTaskDate(task.dueDate) || parseTaskDate(task.plannedEndDate);
+                                const startDate = parseTaskDate(task.plannedStartDate);
+                                return (
+                                    <div
+                                        key={task.id}
+                                        className="bg-zinc-50 dark:bg-zinc-800/40 hover:bg-zinc-100 dark:hover:bg-zinc-800 p-3 rounded-lg transition"
+                                    >
+                                        <div className="flex justify-between items-start text-sm">
+                                            <span className="text-zinc-900 dark:text-white">{task.title}</span>
+                                            <span className={`text-xs px-2 py-0.5 rounded ${typeColors[task.type]}`}>
+                                                {task.type}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                                            {startDate && dueDate && !isSameDay(startDate, dueDate) 
+                                                ? `${format(startDate, "MMM d")} - ${format(dueDate, "MMM d")}`
+                                                : dueDate && format(dueDate, "MMM d")
+                                            }
+                                        </p>
                                     </div>
-                                    <p className="text-xs text-zinc-600 dark:text-zinc-400">{format(task.due_date, "MMM d")}</p>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -160,19 +241,22 @@ const ProjectCalendar = ({ tasks }) => {
                             <Clock className="w-4 h-4" /> Overdue Tasks ({overdueTasks.length})
                         </h3>
                         <div className="space-y-2">
-                            {overdueTasks.slice(0, 5).map((task) => (
-                                <div key={task.id} className="bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 p-3 rounded-lg transition" >
-                                    <div className="flex justify-between text-sm text-zinc-900 dark:text-white">
-                                        <span>{task.title}</span>
-                                        <span className="text-xs px-2 py-0.5 rounded bg-red-200 dark:bg-red-500 text-red-900 dark:text-red-900">
-                                            {task.type}
-                                        </span>
+                            {overdueTasks.slice(0, 5).map((task) => {
+                                const dueDate = parseTaskDate(task.dueDate) || parseTaskDate(task.plannedEndDate);
+                                return (
+                                    <div key={task.id} className="bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 p-3 rounded-lg transition" >
+                                        <div className="flex justify-between text-sm text-zinc-900 dark:text-white">
+                                            <span>{task.title}</span>
+                                            <span className="text-xs px-2 py-0.5 rounded bg-red-200 dark:bg-red-500 text-red-900 dark:text-red-900">
+                                                {task.type}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-red-600 dark:text-red-300">
+                                            Due {dueDate && format(dueDate, "MMM d")}
+                                        </p>
                                     </div>
-                                    <p className="text-xs text-red-600 dark:text-red-300">
-                                        Due {format(task.due_date, "MMM d")}
-                                    </p>
-                                </div>
-                            ))}
+                                );
+                            })}
                             {overdueTasks.length > 5 && (
                                 <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center">
                                     +{overdueTasks.length - 5} more

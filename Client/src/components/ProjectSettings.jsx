@@ -3,16 +3,28 @@ import { Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import AddProjectMember from "./AddProjectMember";
 
+// Helper to safely format date
+const formatDate = (date) => {
+    if (!date) return "";
+    try {
+        const d = new Date(date);
+        if (isNaN(d.getTime())) return "";
+        return format(d, "yyyy-MM-dd");
+    } catch {
+        return "";
+    }
+};
+
 export default function ProjectSettings({ project }) {
 
     const [formData, setFormData] = useState({
-        name: "New Website Launch",
-        description: "Initial launch for new web platform.",
+        name: "",
+        description: "",
         status: "PLANNING",
         priority: "MEDIUM",
-        start_date: "2025-09-10",
-        end_date: "2025-10-15",
-        progress: 30,
+        startDate: null,
+        endDate: null,
+        progress: 0,
     });
 
     const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -24,7 +36,17 @@ export default function ProjectSettings({ project }) {
     };
 
     useEffect(() => {
-        if (project) setFormData(project);
+        if (project) {
+            setFormData({
+                name: project.name || "",
+                description: project.description || "",
+                status: project.status || "PLANNING",
+                priority: project.priority || "MEDIUM",
+                startDate: project.startDate || null,
+                endDate: project.endDate || null,
+                progress: project.progress || 0,
+            });
+        }
     }, [project]);
 
     const inputClasses = "w-full px-3 py-2 rounded mt-2 border text-sm dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-300";
@@ -78,11 +100,11 @@ export default function ProjectSettings({ project }) {
                     <div className="space-y-4 grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className={labelClasses}>Start Date</label>
-                            <input type="date" value={format(formData.start_date, "yyyy-MM-dd")} onChange={(e) => setFormData({ ...formData, start_date: new Date(e.target.value) })} className={inputClasses} />
+                            <input type="date" value={formatDate(formData.startDate)} onChange={(e) => setFormData({ ...formData, startDate: e.target.value ? new Date(e.target.value) : null })} className={inputClasses} />
                         </div>
                         <div className="space-y-2">
                             <label className={labelClasses}>End Date</label>
-                            <input type="date" value={format(formData.end_date, "yyyy-MM-dd")} onChange={(e) => setFormData({ ...formData, end_date: new Date(e.target.value) })} className={inputClasses} />
+                            <input type="date" value={formatDate(formData.endDate)} onChange={(e) => setFormData({ ...formData, endDate: e.target.value ? new Date(e.target.value) : null })} className={inputClasses} />
                         </div>
                     </div>
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
@@ -8,7 +8,15 @@ import toast from "react-hot-toast";
 
 export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, projectId }) {
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
-    const project = currentWorkspace?.projects?.find((p) => p.id === projectId);
+    const myProjects = useSelector((state) => state.workspace?.myProjects || []);
+    
+    // Get project from either workspace projects or myProjects
+    const project = useMemo(() => {
+        const workspaceProject = currentWorkspace?.projects?.find((p) => p.id === projectId);
+        if (workspaceProject) return workspaceProject;
+        return myProjects.find((p) => p.id === projectId);
+    }, [currentWorkspace, myProjects, projectId]);
+    
     const teamMembers = project?.members || [];
     const dispatch = useDispatch();
     const { getToken } = useAuth();
@@ -21,6 +29,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
         status: "TODO",
         priority: "MEDIUM",
         assigneeId: "",
+        start_date: "",
         due_date: "",
     });
 
@@ -32,8 +41,18 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
             return;
         }
 
+        if (!formData.start_date) {
+            toast.error("Start date is required");
+            return;
+        }
+
         if (!formData.due_date) {
             toast.error("Due date is required");
+            return;
+        }
+
+        if (new Date(formData.start_date) > new Date(formData.due_date)) {
+            toast.error("Start date must be before due date");
             return;
         }
 
@@ -53,6 +72,8 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                     status: formData.status,
                     priority: formData.priority,
                     assigneeId: formData.assigneeId,
+                    plannedStartDate: formData.start_date,
+                    plannedEndDate: formData.due_date,
                     due_date: formData.due_date,
                 },
                 getToken,
@@ -68,6 +89,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                 status: "TODO",
                 priority: "MEDIUM",
                 assigneeId: "",
+                start_date: "",
                 due_date: "",
             });
         } catch (error) {
@@ -142,18 +164,32 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         </div>
                     </div>
 
-                    {/* Due Date */}
-                    <div className="space-y-1">
-                        <label className="text-sm font-medium">Due Date</label>
-                        <div className="flex items-center gap-2">
-                            <CalendarIcon className="size-5 text-zinc-500 dark:text-zinc-400" />
-                            <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} min={new Date().toISOString().split('T')[0]} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" />
+                    {/* Start Date & Due Date */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-sm font-medium">Start Date</label>
+                            <div className="flex items-center gap-2">
+                                <CalendarIcon className="size-5 text-zinc-500 dark:text-zinc-400" />
+                                <input type="date" value={formData.start_date} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} min={new Date().toISOString().split('T')[0]} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" />
+                            </div>
+                            {formData.start_date && (
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {format(new Date(formData.start_date), "PPP")}
+                                </p>
+                            )}
                         </div>
-                        {formData.due_date && (
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                                {format(new Date(formData.due_date), "PPP")}
-                            </p>
-                        )}
+                        <div className="space-y-1">
+                            <label className="text-sm font-medium">Due Date</label>
+                            <div className="flex items-center gap-2">
+                                <CalendarIcon className="size-5 text-zinc-500 dark:text-zinc-400" />
+                                <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} min={formData.start_date || new Date().toISOString().split('T')[0]} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" />
+                            </div>
+                            {formData.due_date && (
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                    {format(new Date(formData.due_date), "PPP")}
+                                </p>
+                            )}
+                        </div>
                     </div>
 
                     {/* Footer */}
