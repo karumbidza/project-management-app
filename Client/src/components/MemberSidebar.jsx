@@ -1,10 +1,10 @@
+// FOLLO ACCESS
 import { useEffect, useRef } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { setCurrentProject } from '../features/workspaceSlice'
 import MyTasksSidebar from './MyTasksSidebar'
 import { 
-    LayoutDashboardIcon, 
     FolderOpenIcon, 
     CheckSquareIcon,
     GanttChart,
@@ -20,10 +20,10 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
     const { user } = useUser();
     const sidebarRef = useRef(null);
 
-    // Menu items for members - limited compared to admin
+    // FOLLO ACCESS: My Tasks is the member's primary/home view
     const menuItems = [
-        { name: 'My Dashboard', href: '/', icon: LayoutDashboardIcon },
         { name: 'My Tasks', href: '/tasks', icon: CheckSquareIcon },
+        { name: 'Projects', href: '/projects', icon: FolderOpenIcon },
     ];
 
     useEffect(() => {

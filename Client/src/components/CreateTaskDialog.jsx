@@ -1,10 +1,16 @@
-import { useState, useMemo } from "react";
-import { Calendar as CalendarIcon } from "lucide-react";
+// FOLLO FIX
+// FOLLO WORKFLOW
+// FOLLO DEPS
+import { useState, useMemo, useEffect } from "react";
+import { Calendar as CalendarIcon, FileStack } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
-import { format } from "date-fns";
-import { createTaskAsync } from "../features/workspaceSlice";
+import { format, addDays } from "date-fns";
+import { createTaskAsync } from "../features/taskSlice";
 import toast from "react-hot-toast";
+import LoadingButton from "./ui/LoadingButton";
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, projectId }) {
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
@@ -22,16 +28,56 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
     const { getToken } = useAuth();
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [taskTemplates, setTaskTemplates] = useState([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState("");
     const [formData, setFormData] = useState({
         title: "",
         description: "",
-        type: "TASK",
-        status: "TODO",
-        priority: "MEDIUM",
         assigneeId: "",
         start_date: "",
         due_date: "",
     });
+
+    // Close on Escape key
+    useEffect(() => {
+        if (!showCreateTask) return;
+        const h = (e) => { if (e.key === 'Escape') setShowCreateTask(false); };
+        document.addEventListener('keydown', h);
+        return () => document.removeEventListener('keydown', h);
+    }, [showCreateTask, setShowCreateTask]);
+
+    // Fetch task templates for this workspace
+    useEffect(() => {
+        if (!currentWorkspace?.id) return;
+        const loadTemplates = async () => {
+            try {
+                const token = await getToken();
+                const res = await fetch(`${API_URL}/api/v1/templates/tasks?workspaceId=${currentWorkspace.id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const json = await res.json();
+                if (json.success) setTaskTemplates(json.data || []);
+            } catch (err) { console.error('[CreateTaskDialog] Template load failed:', err.message); }
+        };
+        loadTemplates();
+    }, [currentWorkspace?.id, getToken]);
+
+    // When a template is selected, pre-fill the form
+    const handleTemplateSelect = (templateId) => {
+        setSelectedTemplateId(templateId);
+        if (!templateId) return; // "Custom" selected — keep current values
+        const tpl = taskTemplates.find((t) => t.id === templateId);
+        if (!tpl) return;
+        const today = new Date();
+        const dueDate = addDays(today, tpl.durationDays || 1);
+        setFormData((prev) => ({
+            ...prev,
+            title: tpl.name,
+            description: tpl.description || "",
+            start_date: format(today, "yyyy-MM-dd"),
+            due_date: format(dueDate, "yyyy-MM-dd"),
+        }));
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -68,9 +114,6 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                 taskData: {
                     title: formData.title,
                     description: formData.description,
-                    type: formData.type,
-                    status: formData.status,
-                    priority: formData.priority,
                     assigneeId: formData.assigneeId,
                     plannedStartDate: formData.start_date,
                     plannedEndDate: formData.due_date,
@@ -85,9 +128,6 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
             setFormData({
                 title: "",
                 description: "",
-                type: "TASK",
-                status: "TODO",
-                priority: "MEDIUM",
                 assigneeId: "",
                 start_date: "",
                 due_date: "",
@@ -104,6 +144,28 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
             <div className="bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-lg shadow-lg w-full max-w-md p-6 text-zinc-900 dark:text-white">
                 <h2 className="text-xl font-bold mb-4">Create New Task</h2>
 
+                {/* Template Picker */}
+                {taskTemplates.length > 0 && (
+                    <div className="mb-4 p-3 rounded-lg border border-dashed border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20">
+                        <label className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-400 mb-2">
+                            <FileStack className="size-4" />
+                            Use a Task Template
+                        </label>
+                        <select
+                            value={selectedTemplateId}
+                            onChange={(e) => handleTemplateSelect(e.target.value)}
+                            className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">-- Custom (manual) --</option>
+                            {taskTemplates.map((tpl) => (
+                                <option key={tpl.id} value={tpl.id}>
+                                    {tpl.name} — {tpl.priority}, {tpl.durationDays}d
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Title */}
                     <div className="space-y-1">
@@ -117,51 +179,17 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         <textarea value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Describe the task" className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1 h-24 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
 
-                    {/* Type & Priority */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium">Type</label>
-                            <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
-                                <option value="BUG">Bug</option>
-                                <option value="FEATURE">Feature</option>
-                                <option value="TASK">Task</option>
-                                <option value="IMPROVEMENT">Improvement</option>
-                                <option value="OTHER">Other</option>
-                            </select>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium">Priority</label>
-                            <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1"                             >
-                                <option value="LOW">Low</option>
-                                <option value="MEDIUM">Medium</option>
-                                <option value="HIGH">High</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* Assignee and Status */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium">Assignee</label>
-                            <select value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
-                                <option value="">Unassigned</option>
-                                {teamMembers.map((member) => (
-                                    <option key={member?.user.id} value={member?.user.id}>
-                                        {member?.user.email}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium">Status</label>
-                            <select value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
-                                <option value="TODO">To Do</option>
-                                <option value="IN_PROGRESS">In Progress</option>
-                                <option value="DONE">Done</option>
-                            </select>
-                        </div>
+                    {/* FOLLO DEPS — Assignee (priority auto-calculated from dependencies) */}
+                    <div className="space-y-1">
+                        <label className="text-sm font-medium">Assignee</label>
+                        <select value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
+                            <option value="">Unassigned</option>
+                            {teamMembers.map((member) => (
+                                <option key={member?.user.id} value={member?.user.id}>
+                                    {member?.user.name || member?.user.email}
+                                </option>
+                            ))}
+                        </select>
                     </div>
 
                     {/* Start Date & Due Date */}
@@ -197,9 +225,9 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         <button type="button" onClick={() => setShowCreateTask(false)} className="rounded border border-zinc-300 dark:border-zinc-700 px-5 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 transition" >
                             Cancel
                         </button>
-                        <button type="submit" disabled={isSubmitting} className="rounded px-5 py-2 text-sm bg-gradient-to-br from-blue-500 to-blue-600 hover:opacity-90 text-white dark:text-zinc-200 transition" >
-                            {isSubmitting ? "Creating..." : "Create Task"}
-                        </button>
+                        <LoadingButton type="submit" loading={isSubmitting} className="rounded px-5 py-2 text-sm bg-gradient-to-br from-blue-500 to-blue-600 hover:opacity-90 text-white dark:text-zinc-200 transition" >
+                            Create Task
+                        </LoadingButton>
                     </div>
                 </form>
             </div>

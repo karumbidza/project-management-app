@@ -12,6 +12,15 @@ if (!PUBLISHABLE_KEY) {
   throw new Error('Missing Clerk Publishable Key')
 }
 
+// FOLLO NOTIFY — Register service worker for push notifications
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[SW] Registration failed:', err);
+    });
+  });
+}
+
 createRoot(document.getElementById('root')).render(
     <BrowserRouter>
         <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">

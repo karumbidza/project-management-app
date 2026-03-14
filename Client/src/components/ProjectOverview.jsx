@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { useSelector } from "react-redux";
 import CreateProjectDialog from "./CreateProjectDialog";
 
+// FOLLO WORKFLOW
 const ProjectOverview = () => {
     const statusColors = {
         PLANNING: "bg-zinc-200 text-zinc-800 dark:bg-zinc-600 dark:text-zinc-200",
@@ -15,9 +16,10 @@ const ProjectOverview = () => {
     };
 
     const priorityColors = {
+        CRITICAL: "border-red-400 text-red-700 dark:border-red-500 dark:text-red-400",
         LOW: "border-zinc-300 text-zinc-600 dark:border-zinc-600 dark:text-zinc-400",
         MEDIUM: "border-amber-300 text-amber-700 dark:border-amber-500 dark:text-amber-400",
-        HIGH: "border-green-300 text-green-700 dark:border-green-500 dark:text-green-400",
+        HIGH: "border-orange-300 text-orange-700 dark:border-orange-500 dark:text-orange-400",
     };
 
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);

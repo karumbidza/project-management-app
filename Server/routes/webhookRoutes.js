@@ -1,3 +1,4 @@
+// FOLLO FIX
 import express from 'express';
 import { Webhook } from 'svix';
 import { inngest } from '../inngest/index.js';
@@ -47,8 +48,6 @@ webhookRouter.post('/clerk', express.raw({ type: 'application/json' }), async (r
     const eventType = evt.type;
     const eventData = evt.data;
 
-    console.log(`Received Clerk webhook: ${eventType}`);
-
     // Map Clerk event types to Inngest events
     const eventMap = {
         'user.created': 'clerk/user.created',
@@ -71,13 +70,12 @@ webhookRouter.post('/clerk', express.raw({ type: 'application/json' }), async (r
                 name: inngestEventName,
                 data: eventData,
             });
-            console.log(`Sent event to Inngest: ${inngestEventName}`);
         } catch (err) {
             console.error('Failed to send event to Inngest:', err);
             return res.status(500).json({ error: 'Failed to process webhook' });
         }
     } else {
-        console.log(`Unhandled event type: ${eventType}`);
+        // Unhandled event type — no action needed
     }
 
     res.status(200).json({ received: true });

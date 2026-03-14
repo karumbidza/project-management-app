@@ -1,9 +1,14 @@
+// FOLLO AUTH-FIX
 import { useSelector } from 'react-redux';
-import { useUser } from '@clerk/clerk-react';
+import { useUser, useAuth } from '@clerk/clerk-react';
 
 /**
  * Custom hook to get current user's role in the workspace/project
  * Returns role info and helper functions
+ * 
+ * FOLLO AUTH-FIX: Uses useAuth().userId (LIVE Clerk session) for all
+ * role matching instead of cached email/user object to prevent stale
+ * role detection when switching accounts in the same browser.
  * 
  * Handles two scenarios:
  * 1. Admin/Owner: Has workspace membership, can see all projects
@@ -11,28 +16,43 @@ import { useUser } from '@clerk/clerk-react';
  */
 export function useUserRole() {
     const { user } = useUser();
+    const { userId: liveUserId, isLoaded } = useAuth();
     const { currentWorkspace, workspaces, myProjects, currentProject, isMemberView, loadingStates } = useSelector((state) => state.workspace);
     
-    // Check if user is in member-only view (has projects but no workspaces)
-    // Only true if: isMemberView flag is set, OR user has projects but zero workspaces (and workspaces have finished loading)
-    const hasNoWorkspaces = workspaces?.length === 0 && !loadingStates?.workspaces;
-    const isProjectMemberOnly = isMemberView || (myProjects?.length > 0 && hasNoWorkspaces && !currentWorkspace);
+    // FOLLO AUTH-FIX: Always use liveUserId from useAuth() — this is the
+    // canonical Clerk session ID, not a cached value from a previous session.
+    const userId = liveUserId;
+    const userEmail = user?.primaryEmailAddress?.emailAddress;
     
-    // Find user's membership in current workspace (if any)
+    // Check if user is in member-only view
+    // True if: (a) isMemberView flag is set, (b) no workspaces at all, OR (c) user is not ADMIN/OWNER in any workspace
+    const workspacesLoaded = !loadingStates?.workspaces;
+    
+    const isAdminInAnyWorkspace = workspacesLoaded && workspaces?.some(ws => {
+        if (ws.ownerId === userId) return true;
+        return ws.members?.some(m =>
+            (m.userId === userId || m.user?.id === userId) && m.role === 'ADMIN'
+        );
+    });
+    
+    // Member view: not admin, but has some data (workspaces or projects)
+    const hasAnyData = (workspaces?.length > 0 || myProjects?.length > 0);
+    const isProjectMemberOnly = isMemberView || (workspacesLoaded && !isAdminInAnyWorkspace && hasAnyData);
+    
+    // FOLLO AUTH-FIX: Match by userId first, fall back to email
     const workspaceMembership = currentWorkspace?.members?.find(
-        (m) => m.user?.email === user?.primaryEmailAddress?.emailAddress
+        (m) => m.userId === userId || m.user?.id === userId
     );
     
     // Find user's role in current project (for member view)
     const projectMembership = currentProject?.members?.find(
-        (m) => m.user?.email === user?.primaryEmailAddress?.emailAddress
+        (m) => m.userId === userId || m.user?.id === userId
     ) || (currentProject?.myRole ? { role: currentProject.myRole } : null);
     
     const workspaceRole = workspaceMembership?.role || null;
     const projectRole = projectMembership?.role || null;
     
-    const isWorkspaceOwner = currentWorkspace?.ownerId === user?.id || 
-                             currentWorkspace?.owner?.email === user?.primaryEmailAddress?.emailAddress;
+    const isWorkspaceOwner = currentWorkspace?.ownerId === userId;
     
     // Role checks - based on context (workspace or project)
     const isAdmin = !isProjectMemberOnly && (isWorkspaceOwner || workspaceRole === 'ADMIN');
@@ -52,16 +72,26 @@ export function useUserRole() {
     const canCreateProjects = isAdmin; // Only admins can create projects
     const canDeleteWorkspace = isWorkspaceOwner;
     
-    // Task permissions - members CAN create and assign tasks
-    const canCreateTasks = isAdmin || isProjectOwner || isProjectContributor;
-    const canAssignTasks = isAdmin || isProjectOwner || isProjectContributor;
+    // Task permissions — only PM/admin can create tasks (FOLLO PERMISSIONS)
+    const canCreateTasks = isAdmin || isProjectOwner || projectRole === 'MANAGER';
+    const canAssignTasks = isAdmin || isProjectOwner || projectRole === 'MANAGER';
     const canViewGantt = true; // Everyone can view Gantt charts
+    
+    // SLA permissions (FOLLO SLA — Phase 8)
+    const canSubmitTask = isProjectContributor || isProjectOwner || isAdmin; // assignees submit
+    const canApproveReject = isAdmin || isProjectOwner || projectRole === 'MANAGER';
+    const canRaiseBlocker = canSubmitTask; // assignees raise blockers
+    const canResolveBlocker = canApproveReject; // PMs/admins resolve
+    const canViewSla = true; // any member can view SLA summary
+    const canManageTemplates = isAdmin || isProjectOwner || projectRole === 'MANAGER';
+    const canApplyTemplate = isAdmin || isProjectOwner || projectRole === 'MANAGER';
     
     return {
         // User info
         user,
-        userId: user?.id,
-        userEmail: user?.primaryEmailAddress?.emailAddress,
+        userId,
+        userEmail,
+        isLoaded: isLoaded && !!userId,
         
         // View mode
         isProjectMemberOnly,
@@ -90,6 +120,15 @@ export function useUserRole() {
         canCreateTasks,
         canAssignTasks,
         canViewGantt,
+        
+        // SLA permissions
+        canSubmitTask,
+        canApproveReject,
+        canRaiseBlocker,
+        canResolveBlocker,
+        canViewSla,
+        canManageTemplates,
+        canApplyTemplate,
         
         // Workspace/Project info
         currentWorkspace,

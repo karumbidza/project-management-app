@@ -1,3 +1,7 @@
+// FOLLO PERF
+// FOLLO FIX
+// FOLLO SLA
+// FOLLO ACCESS
 /**
  * Project Controller
  * Handles project CRUD and project member management
@@ -23,6 +27,8 @@ import {
   ERROR_CODES 
 } from "../utils/constants.js";
 import emailService from "../utils/emailService.js";
+import { withCache, invalidateCachePattern, invalidateCache, CACHE_KEYS, CACHE_TTL } from "../lib/cache.js";
+import { userSelect, taskListSelect, memberSelect, projectListSelect } from "../lib/selectShapes.js";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // PROJECT CRUD
@@ -31,6 +37,7 @@ import emailService from "../utils/emailService.js";
 /**
  * Get all projects in a workspace
  * GET /api/v1/projects/workspace/:workspaceId
+ * FOLLO PERF: Cached for 2 minutes
  */
 export const getWorkspaceProjects = asyncHandler(async (req, res) => {
   const { workspaceId } = req.params;
@@ -48,45 +55,137 @@ export const getWorkspaceProjects = asyncHandler(async (req, res) => {
     );
   }
 
-  const projects = await prisma.project.findMany({
-    where: { workspaceId },
-    include: {
-      owner: true,
-      members: { include: { user: true } },
-      tasks: { include: { assignee: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const projects = await withCache(
+    CACHE_KEYS.workspaceProjects(workspaceId),
+    CACHE_TTL.PROJECT_LIST,
+    async () => {
+      return prisma.project.findMany({
+        where: { workspaceId },
+        select: {
+          ...projectListSelect,
+          owner: { select: userSelect },
+          members: { select: memberSelect },
+          tasks: {
+            select: {
+              id: true,
+              title: true,
+              type: true,
+              status: true,
+              priority: true,
+              dueDate: true,
+              isDelayed: true,
+              assigneeId: true,
+              slaStatus: true,
+              assignee: { select: { id: true, name: true, image: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+  );
 
   sendSuccess(res, projects);
 });
 
 /**
- * Get all projects the current user is a member of (for non-workspace users)
+ * Get all projects the current user can access
  * GET /api/v1/projects/my-projects
+ * FOLLO ACCESS: Admins/owners see ALL workspace projects.
+ *               Members see only projects where they are a ProjectMember
+ *               OR have at least one task assigned.
  */
 export const getMyProjects = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();
 
-  // Get all projects where user is a member (direct project membership, not through workspace)
-  const projectMemberships = await prisma.projectMember.findMany({
-    where: { userId },
-    include: {
-      project: {
-        include: {
-          owner: true,
-          members: { include: { user: true } },
-          tasks: { include: { assignee: true } },
-          workspace: true,
-        },
-      },
-    },
-  });
+  const projects = await withCache(
+    CACHE_KEYS.userProjects(userId),
+    CACHE_TTL.PROJECT_LIST,
+    async () => {
+      // Determine if user is admin/owner in ANY workspace
+      const workspaceMemberships = await prisma.workspaceMember.findMany({
+        where: { userId },
+        include: { workspace: { select: { ownerId: true } } },
+      });
 
-  const projects = projectMemberships.map(pm => ({
-    ...pm.project,
-    myRole: pm.role, // Include the user's role in this project
-  }));
+      const adminWorkspaceIds = workspaceMemberships
+        .filter(wm => wm.role === 'ADMIN' || wm.workspace.ownerId === userId)
+        .map(wm => wm.workspaceId);
+
+      const memberWorkspaceIds = workspaceMemberships
+        .filter(wm => !adminWorkspaceIds.includes(wm.workspaceId))
+        .map(wm => wm.workspaceId);
+
+      const projectSelect = {
+        ...projectListSelect,
+        owner: { select: userSelect },
+        members: { select: memberSelect },
+        tasks: {
+          select: {
+            id: true, title: true, type: true, status: true,
+            priority: true, dueDate: true, isDelayed: true,
+            assigneeId: true, slaStatus: true, completionWeight: true,
+            plannedStartDate: true, plannedEndDate: true,
+            actualStartDate: true, extensionStatus: true,
+            blockerRaisedAt: true,
+            assignee: { select: userSelect },
+          },
+        },
+        workspace: { select: { id: true, name: true, slug: true } },
+      };
+
+      // FOLLO ACCESS: Admin workspaces — get ALL projects
+      const adminProjects = adminWorkspaceIds.length > 0
+        ? await prisma.project.findMany({
+            where: { workspaceId: { in: adminWorkspaceIds } },
+            select: projectSelect,
+            orderBy: { createdAt: 'desc' },
+          })
+        : [];
+
+      // FOLLO ACCESS: Member workspaces — only projects where user is a
+      // ProjectMember OR has at least one assigned task
+      let memberProjects = [];
+      if (memberWorkspaceIds.length > 0) {
+        const [byMembership, byAssignment] = await Promise.all([
+          prisma.project.findMany({
+            where: {
+              workspaceId: { in: memberWorkspaceIds },
+              members: { some: { userId } },
+            },
+            select: projectSelect,
+          }),
+          prisma.project.findMany({
+            where: {
+              workspaceId: { in: memberWorkspaceIds },
+              tasks: { some: { assigneeId: userId } },
+            },
+            select: projectSelect,
+          }),
+        ]);
+
+        const seen = new Set();
+        memberProjects = [...byMembership, ...byAssignment].filter(p => {
+          if (seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        });
+      }
+
+      // Merge admin + member projects, deduplicate
+      const seen = new Set();
+      return [...adminProjects, ...memberProjects]
+        .filter(p => {
+          if (seen.has(p.id)) return false;
+          seen.add(p.id);
+          return true;
+        })
+        .map(p => {
+          const pm = p.members?.find(m => m.userId === userId);
+          return { ...p, myRole: pm?.role || 'MEMBER' };
+        });
+    }
+  );
 
   sendSuccess(res, projects);
 });
@@ -144,7 +243,7 @@ export const getProjectById = asyncHandler(async (req, res) => {
 export const createProject = asyncHandler(async (req, res) => {
   const { workspaceId } = req.params;
   const { userId } = await req.auth();
-  const { name, description, priority, status, startDate, endDate } = req.body;
+  const { name, description, priority, status, startDate, endDate, templateId } = req.body;
 
   // Check workspace membership
   const membership = await prisma.workspaceMember.findUnique({
@@ -190,6 +289,77 @@ export const createProject = asyncHandler(async (req, res) => {
       members: { include: { user: true } },
     },
   });
+
+  // FOLLO SLA: Apply project template if one was selected
+  if (templateId) {
+    try {
+      const template = await prisma.projectTemplate.findUnique({
+        where: { id: templateId },
+        include: {
+          tasks: {
+            include: { taskTemplate: true },
+            orderBy: { sortOrder: "asc" },
+          },
+        },
+      });
+
+      if (template && template.tasks.length > 0) {
+        const anchorDate = startDate ? new Date(startDate) : new Date();
+        const addDays = (date, days) => {
+          const d = new Date(date);
+          d.setDate(d.getDate() + days);
+          return d;
+        };
+
+        // FOLLO FIX — Create all tasks in parallel instead of sequential N+1
+        const createdTasks = await Promise.all(
+          template.tasks.map(pt => {
+            const tt = pt.taskTemplate;
+            const taskStart = addDays(anchorDate, pt.offsetDays);
+            const taskEnd = addDays(taskStart, Math.max(tt.durationDays - 1, 0));
+            return prisma.task.create({
+              data: {
+                projectId: project.id,
+                title: tt.name,
+                description: tt.description,
+                type: tt.type,
+                priority: tt.priority,
+                status: "TODO",
+                assigneeId: userId,
+                createdById: userId,
+                plannedStartDate: taskStart,
+                plannedEndDate: taskEnd,
+                dueDate: taskEnd,
+                completionWeight: tt.completionWeight,
+                sortOrder: pt.sortOrder,
+              },
+            });
+          })
+        );
+
+        // Create dependencies in bulk
+        const deps = template.tasks
+          .map((pt, i) => {
+            if (pt.predecessorIndex == null) return null;
+            const predId = createdTasks[pt.predecessorIndex]?.id;
+            if (!predId) return null;
+            return { predecessorId: predId, successorId: createdTasks[i].id };
+          })
+          .filter(Boolean);
+
+        if (deps.length > 0) {
+          await prisma.taskDependency.createMany({ data: deps });
+        }
+      }
+    } catch (err) {
+      // Template apply is best-effort — project is already created
+      console.error('[createProject] Template apply failed:', err.message);
+    }
+  }
+
+  // FOLLO PERF: Invalidate caches
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(userId));
+  invalidateCachePattern(CACHE_KEYS.workspaceProjects(workspaceId));
 
   sendCreated(res, project, 'Project created successfully');
 });
@@ -595,4 +765,58 @@ export const removeProjectMember = asyncHandler(async (req, res) => {
   await prisma.projectMember.delete({ where: { id: memberId } });
 
   sendNoContent(res);
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TOGGLE PROJECT MEMBER ACTIVE STATUS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export const toggleProjectMember = asyncHandler(async (req, res) => {
+  const { projectId, memberId } = req.params;
+  const { userId } = await req.auth();
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { members: true },
+  });
+
+  if (!project) {
+    throw new NotFoundError('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+  }
+
+  const targetMember = await prisma.projectMember.findUnique({
+    where: { id: memberId },
+  });
+
+  if (!targetMember || targetMember.projectId !== projectId) {
+    throw new NotFoundError('Member not found', ERROR_CODES.NOT_FOUND);
+  }
+
+  // Can't disable the owner
+  if (targetMember.role === PROJECT_ROLES.OWNER) {
+    throw new AuthorizationError(
+      'Cannot disable the project owner',
+      ERROR_CODES.INVALID_OPERATION
+    );
+  }
+
+  // Only owner or manager can toggle
+  const requesterMembership = project.members.find(m => m.userId === userId);
+  const isOwner = project.ownerId === userId;
+  const canToggle = isOwner ||
+    (requesterMembership && [PROJECT_ROLES.OWNER, PROJECT_ROLES.MANAGER].includes(requesterMembership.role));
+
+  if (!canToggle) {
+    throw new AuthorizationError(
+      'Not authorized to enable/disable members',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
+
+  const updatedMember = await prisma.projectMember.update({
+    where: { id: memberId },
+    data: { isActive: !targetMember.isActive },
+    include: { user: true },
+  });
+
+  sendSuccess(res, updatedMember, `Member ${updatedMember.isActive ? 'enabled' : 'disabled'}`);
 });

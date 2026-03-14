@@ -1,3 +1,7 @@
+// FOLLO SLA
+// FOLLO GANTT-2
+// FOLLO PERF
+// FOLLO WORKFLOW
 generator client {
     provider = "prisma-client-js"
 }
@@ -28,7 +32,7 @@ enum TaskStatus {
     TODO
     IN_PROGRESS
     BLOCKED
-    IN_REVIEW
+    PENDING_APPROVAL
     DONE
 }
 
@@ -65,6 +69,9 @@ enum NotificationType {
     COMMENT_ADDED
     PROJECT_INVITE
     DELAY_ALERT
+    SLA_WARNING
+    BLOCKER_RAISED
+    TASK_APPROVED
 }
 
 enum InviteStatus {
@@ -86,6 +93,15 @@ enum ActivityType {
     DEPENDENCY_REMOVED
     HANDOFF_INITIATED
     HANDOFF_COMPLETED
+}
+
+// Comment media types (FOLLO MEDIA)
+enum CommentType {
+    TEXT
+    IMAGE
+    VIDEO
+    AUDIO
+    FILE
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -111,6 +127,8 @@ model User {
     activities       TaskActivity[]
     notifications    Notification[]
     invitationsSent  Invitation[]      @relation("InvitedBy")
+    contractorScore ContractorScore?
+    pushSubscriptions PushSubscription[]
 
     // Indexes for query performance
     @@index([email])
@@ -198,6 +216,7 @@ model ProjectMember {
     userId    String
     projectId String
     role      ProjectRole @default(CONTRIBUTOR)
+    isActive  Boolean     @default(true)
     joinedAt  DateTime    @default(now())
 
     // Relations
@@ -220,8 +239,9 @@ model Task {
     title       String
     description String?
     status      TaskStatus @default(TODO)
-    type        TaskType   @default(TASK)
+    type        TaskType?  @default(TASK)  // FOLLO WORKFLOW — optional, hidden from UI
     priority    Priority   @default(MEDIUM)
+    priorityOverride Boolean @default(false)  // FOLLO WORKFLOW — when true, skip auto-calc
     
     // Assignment
     assigneeId  String
@@ -239,6 +259,61 @@ model Task {
     delayDays     Int     @default(0)
     delayReason   String?
     
+    // SLA state machine
+    slaStatus           String    @default("HEALTHY")
+    // HEALTHY | AT_RISK | PENDING_APPROVAL | BLOCKED |
+    // BREACHED | RESOLVED_ON_TIME | RESOLVED_LATE
+
+    // Approval workflow
+    submittedAt         DateTime?
+    submittedById       String?
+    approvedAt          DateTime?
+    approvedById        String?
+    rejectedAt          DateTime?
+    rejectedById        String?
+    rejectionReason     String?
+
+    // Blocker system
+    blockerRaisedAt     DateTime?
+    blockerRaisedById   String?
+    blockerDescription  String?
+    blockerResolvedAt   DateTime?
+    blockerResolvedById String?
+    requiresPhotoOnBlock Boolean  @default(true)
+
+    // SLA clock management
+    slaClockStartedAt   DateTime?
+    slaClockPausedAt    DateTime?
+    slaTotalPausedMs    Int       @default(0)
+
+    // Scoring impact
+    slaBreachCount      Int       @default(0)
+    slaOnTimeCount      Int       @default(0)
+
+    // Completion
+    completionWeight    Int       @default(1)
+    completionNotes     String?
+    completionPhotos    Json?     // Array of photo URLs
+    declarationConfirmed Boolean  @default(false)
+
+    // Deadline extension request (FOLLO WORKFLOW)
+    extensionStatus         String    @default("NONE") // NONE | PENDING | APPROVED | DENIED
+    extensionRequestedAt    DateTime?
+    extensionRequestedById  String?
+    extensionReason         String?
+    extensionProposedDate   DateTime?
+    extensionOriginalDueDate DateTime?
+    extensionApprovedAt     DateTime?
+    extensionApprovedById   String?
+    extensionDeniedAt       DateTime?
+    extensionDeniedById     String?
+
+    // FOLLO GANTT-2 — baseline dates (set once on creation, never updated)
+    // These preserve the original schedule so PM can see slip
+    baselineDueDate       DateTime?
+    baselinePlannedStart  DateTime?
+    baselinePlannedEnd    DateTime?
+
     // Task ordering for Gantt/timeline
     sortOrder     Int     @default(0)
     
@@ -252,6 +327,7 @@ model Task {
     createdBy    User           @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
     comments     Comment[]
     activities   TaskActivity[]
+    slaEvents    SlaEvent[]
     
     // Task Dependencies (self-referential)
     predecessors TaskDependency[] @relation("TaskSuccessor")
@@ -263,7 +339,12 @@ model Task {
     @@index([status])
     @@index([dueDate])
     @@index([isDelayed])
+    @@index([slaStatus])
     @@index([createdAt])
+    // FOLLO PERF — compound indexes for common query patterns
+    @@index([projectId, status])
+    @@index([assigneeId, status])
+    @@index([projectId, slaStatus])
 }
 
 model TaskDependency {
@@ -309,11 +390,23 @@ model TaskActivity {
 
 model Comment {
     id        String   @id @default(uuid())
-    content   String
+    content   String?  // Optional for pure media comments
     userId    String
     taskId    String
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
+    
+    // ━━━ Media fields (FOLLO MEDIA) ━━━
+    type           CommentType @default(TEXT)  // text | image | video | audio | file
+    url            String?     // CDN URL for media (R2 or Mux stream)
+    fileKey        String?     // R2 storage key for deletion
+    thumbnailUrl   String?     // Video thumbnail from Mux
+    duration       Float?      // Video/audio duration in seconds
+    sizeBytes      Int?        // File size for display
+    fileName       String?     // Original filename for downloads
+    muxUploadId    String?     // Mux upload ID for polling status
+    muxAssetId     String?     // Mux asset ID for deletion
+    muxPlaybackId  String?     // Mux playback ID for streaming
 
     // Relations
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -323,11 +416,10 @@ model Comment {
     @@index([taskId])
     @@index([userId])
     @@index([createdAt])
+    @@index([type])
+    // FOLLO PERF — compound index for ordered comments per task
+    @@index([taskId, createdAt])
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// NOTIFICATIONS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 model Notification {
     id        String           @id @default(uuid())
@@ -348,11 +440,10 @@ model Notification {
     @@index([isRead])
     @@index([createdAt])
     @@index([type])
+    // FOLLO PERF — compound indexes for notification queries
+    @@index([userId, isRead])
+    @@index([userId, createdAt])
 }
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// INVITATIONS (for inviting new users)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 model Invitation {
     id          String       @id @default(uuid())
@@ -376,4 +467,122 @@ model Invitation {
     @@index([email])
     @@index([token])
     @@index([status])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SLA SYSTEM (FOLLO SLA)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model ContractorScore {
+    id        String   @id @default(cuid())
+    userId    String   @unique
+    score     Int      @default(100)
+    breaches  Int      @default(0)
+    onTime    Int      @default(0)
+    rejections Int     @default(0)
+    blocked   Int      @default(0)
+    updatedAt DateTime @updatedAt
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@index([score])
+}
+
+model SlaEvent {
+    id          String   @id @default(cuid())
+    taskId      String
+    type        String
+    // CLOCK_STARTED | CLOCK_PAUSED | CLOCK_RESUMED | WARNING_24HR |
+    // WARNING_2HR | BREACHED | SUBMITTED | APPROVED | REJECTED |
+    // BLOCKER_RAISED | BLOCKER_RESOLVED | SCORE_UPDATED
+    triggeredBy String?
+    metadata    Json?
+    createdAt   DateTime @default(now())
+    task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+    @@index([taskId])
+    @@index([type])
+    @@index([createdAt])
+    // FOLLO PERF — compound index for ordered events per task
+    @@index([taskId, createdAt])
+}
+
+model TaskTemplate {
+    id               String   @id @default(cuid())
+    workspaceId      String
+    name             String
+    description      String?
+    type             TaskType @default(TASK)
+    priority         Priority @default(MEDIUM)
+    durationDays     Int      @default(1)
+    completionWeight Int      @default(1)
+    createdById      String
+    createdAt        DateTime @default(now())
+    updatedAt        DateTime @updatedAt
+
+    checklist        TemplateChecklistItem[]
+    projectTasks     ProjectTemplateTask[]
+
+    @@index([workspaceId])
+    @@index([createdById])
+}
+
+model TemplateChecklistItem {
+    id         String   @id @default(cuid())
+    templateId String
+    label      String
+    sortOrder  Int      @default(0)
+    createdAt  DateTime @default(now())
+
+    template TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+    @@index([templateId])
+}
+
+model ProjectTemplate {
+    id          String   @id @default(cuid())
+    workspaceId String
+    name        String
+    description String?
+    createdById String
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    tasks ProjectTemplateTask[]
+
+    @@index([workspaceId])
+    @@index([createdById])
+}
+
+model ProjectTemplateTask {
+    id                String   @id @default(cuid())
+    projectTemplateId String
+    taskTemplateId    String
+    sortOrder         Int      @default(0)
+    offsetDays        Int      @default(0) // Offset from project start
+    predecessorIndex  Int?     // Index of another task in this template (for auto-wiring dependencies)
+
+    projectTemplate ProjectTemplate @relation(fields: [projectTemplateId], references: [id], onDelete: Cascade)
+    taskTemplate    TaskTemplate    @relation(fields: [taskTemplateId], references: [id], onDelete: Cascade)
+
+    @@index([projectTemplateId])
+    @@index([taskTemplateId])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PUSH SUBSCRIPTIONS (FOLLO NOTIFY)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model PushSubscription {
+    id        String   @id @default(uuid())
+    userId    String
+    endpoint  String   @unique
+    p256dh    String
+    auth      String
+    userAgent String?
+    createdAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
 }

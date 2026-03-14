@@ -1,3 +1,7 @@
+// FOLLO AUTH-FIX
+// FOLLO FIX
+// FOLLO BUGFIX-REFRESH
+// FOLLO ACCESS
 import { useState, useEffect, useRef } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
@@ -5,52 +9,80 @@ import MemberSidebar from '../components/MemberSidebar'
 import { Outlet, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
-import { fetchWorkspaces, fetchMyProjects } from '../features/workspaceSlice'
+import { fetchWorkspaces, fetchMyProjects, setCurrentProject, clearWorkspaceState } from '../features/workspaceSlice'
+import { fetchNotifications } from '../features/notificationSlice'
 import { Loader2Icon } from 'lucide-react'
 import { SignIn, SignUp, useUser, useAuth } from '@clerk/clerk-react'
+import { useNotifications } from '../hooks/useNotifications'
 
 function Layout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const { loadingStates, error, workspaces, currentWorkspace, myProjects, currentProject, isMemberView } = useSelector((state) => state.workspace)
     const dispatch = useDispatch()
     const { user, isLoaded } = useUser()
-    const { getToken } = useAuth()
+    const { getToken, userId } = useAuth()
     const hasFetched = useRef(false)
+    const prevUserIdRef = useRef(null)
     const [searchParams] = useSearchParams()
     const inviteEmail = searchParams.get('invite_email')
+    const { subscribeToPush, permission } = useNotifications()
 
     // Initial load of theme
     useEffect(() => {
         dispatch(loadTheme())
     }, [dispatch])
 
-    // Fetch workspaces AND myProjects when user is authenticated
+    // FOLLO BUGFIX-REFRESH: Fetch workspaces AND myProjects when Clerk is FULLY loaded.
+    // Must wait for isLoaded to ensure getToken() returns a valid JWT, not null.
     useEffect(() => {
-        if (user && getToken && !hasFetched.current) {
-            hasFetched.current = true
-            console.log('[Layout] Fetching data...');
-            
-            // Fetch both workspaces and my projects in parallel
-            Promise.all([
-                dispatch(fetchWorkspaces(getToken)).unwrap().catch(err => {
-                    console.warn('[Layout] Workspaces fetch error:', err);
-                    return []; // Return empty array on error
-                }),
-                dispatch(fetchMyProjects(getToken)).unwrap().catch(err => {
-                    console.warn('[Layout] MyProjects fetch error:', err);
-                    return [];
-                })
-            ]).then(([workspacesData, projectsData]) => {
-                console.log('[Layout] Data loaded:', { 
-                    workspaces: workspacesData?.length, 
-                    myProjects: projectsData?.length 
-                });
-            }).catch(err => {
-                console.error('[Layout] Fetch error:', err);
-                hasFetched.current = false; // Allow retry on error
-            });
+        if (!isLoaded || !userId || !getToken) return
+
+        // FOLLO AUTH-FIX: If userId changed, clear stale state from previous session
+        if (prevUserIdRef.current && prevUserIdRef.current !== userId) {
+            dispatch(clearWorkspaceState())
+            hasFetched.current = false
         }
-    }, [user, dispatch])
+        prevUserIdRef.current = userId
+
+        if (hasFetched.current) return
+            
+        // FOLLO BUGFIX-REFRESH: Verify token is valid before marking as fetched
+        const loadInitialData = async () => {
+            // Pre-check: if getToken() returns null, Clerk isn't ready yet — bail
+            const token = await getToken()
+            if (!token) return
+
+            hasFetched.current = true
+
+            try {
+                const [workspacesData, projectsData] = await Promise.all([
+                    dispatch(fetchWorkspaces(getToken)).unwrap().catch(err => {
+                        console.error('[Layout] fetchWorkspaces failed:', err)
+                        return []
+                    }),
+                    dispatch(fetchMyProjects(getToken)).unwrap().catch(err => {
+                        console.error('[Layout] fetchMyProjects failed:', err)
+                        return []
+                    })
+                ])
+
+                // FOLLO ACCESS: No client-side fallback. The backend getMyProjects
+                // now returns the correct set of projects for both admins & members.
+                // If a member has no projects, they see an empty state.
+            } catch (err) {
+                console.error('[Layout] Initial load failed:', err)
+                hasFetched.current = false // Allow retry on error
+            }
+        }
+
+        loadInitialData()
+
+        // FOLLO NOTIFY — fetch notifications + subscribe to push
+        dispatch(fetchNotifications({ getToken }));
+        if (permission === 'granted') {
+            subscribeToPush(getToken);
+        }
+    }, [isLoaded, userId, dispatch]) // FOLLO BUGFIX-REFRESH: isLoaded in deps ensures Clerk is ready
 
     // Debug log (only in dev)
     useEffect(() => {
@@ -92,10 +124,13 @@ function Layout() {
         )
     }
 
-    // 3. Third: Check loading - only show spinner on FIRST load
-    const isLoading = (loadingStates?.workspaces || loadingStates?.myProjects) && 
-                      workspaces?.length === 0 && myProjects?.length === 0;
-    if (isLoading) {
+    // FOLLO BUGFIX-REFRESH: Show spinner while initial data loads.
+    // Covers the gap between "Clerk ready" and "first fetch pending/fulfilled".
+    // hasFetched.current being false means we haven't even started fetching yet.
+    const isInitialLoad = !hasFetched.current || 
+        ((loadingStates?.workspaces || loadingStates?.myProjects) && 
+         workspaces?.length === 0 && myProjects?.length === 0);
+    if (isInitialLoad) {
         return (
             <div className='flex items-center justify-center h-screen bg-white dark:bg-zinc-950'>
                 <Loader2Icon className="size-7 text-blue-500 animate-spin" />
@@ -123,9 +158,21 @@ function Layout() {
     }
 
     // 5. Determine which sidebar to show based on user type
-    // Only show member view if workspaces have finished loading and user truly has none
+    // Show member view if: user is not ADMIN/OWNER in any workspace AND has projects to view
     const workspacesLoaded = !loadingStates?.workspaces;
-    const showMemberView = isMemberView || (workspacesLoaded && myProjects?.length > 0 && workspaces?.length === 0);
+    
+    // FOLLO AUTH-FIX: Use live userId from useAuth() (already in scope), not user?.id
+    const isAdminInAnyWorkspace = workspaces?.some(ws => {
+        if (ws.ownerId === userId) return true;
+        return ws.members?.some(m => 
+            (m.userId === userId || m.user?.id === userId) && m.role === 'ADMIN'
+        );
+    });
+    
+    // Member view: not admin in any workspace, but has data to show (projects or workspaces)
+    // A brand-new user with nothing should see admin view so they can create a workspace
+    const hasAnyData = (workspaces?.length > 0 || myProjects?.length > 0);
+    const showMemberView = workspacesLoaded && !isAdminInAnyWorkspace && hasAnyData;
 
     return (
         <div className="flex bg-white dark:bg-zinc-950 text-gray-900 dark:text-slate-100">

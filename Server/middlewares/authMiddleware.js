@@ -1,3 +1,4 @@
+// FOLLO FIX
 import prisma from "../configs/prisma.js";
 import { clerkClient } from "@clerk/express";
 
@@ -15,14 +16,14 @@ const ensureUserInDb = async (userId) => {
             user = await prisma.user.create({
                 data: { id: userId, name, email, image }
             });
-            console.log(`[Auth] Created new user in database: ${email}`);
+            console.log(`[Auth] Created new user in database: ${userId}`);
         } catch (error) {
             // Handle duplicate email - user might exist with different Clerk ID
             if (error.code === 'P2002') {
                 const existingUser = await prisma.user.findUnique({ where: { email } });
                 if (existingUser && existingUser.id !== userId) {
                     // User exists with old Clerk ID - migrate to new ID
-                    console.log(`[Auth] Migrating user ${email} from ${existingUser.id} to ${userId}`);
+                    console.log(`[Auth] Migrating user ${userId} (duplicate email resolved)`);
                     
                     // Update all relations to use new user ID
                     await prisma.$transaction([
@@ -66,7 +67,7 @@ const ensureUserInDb = async (userId) => {
                     ]);
                     
                     user = await prisma.user.findUnique({ where: { id: userId } });
-                    console.log(`[Auth] Migration complete for ${email}`);
+                    console.log(`[Auth] Migration complete for ${userId}`);
                 } else {
                     user = existingUser;
                 }
@@ -92,7 +93,7 @@ export const protect = async (req, res, next) => {
         req.userId = userId;
         return next();
     } catch (error) {
-        console.log('Auth middleware error:', error);
-        return res.status(401).json({ error: 'Unauthorized', details: error.message });
+        console.error('[Auth] middleware error:', error.message);
+        return res.status(401).json({ error: 'Unauthorized' });
     }
 }

@@ -1,8 +1,10 @@
+// FOLLO SLA
 import { useState, useMemo } from "react";
 import { useSelector, shallowEqual } from "react-redux";
-import { Plus, Search, FolderOpen } from "lucide-react";
+import { Plus, Search, FolderOpen, AlertCircle } from "lucide-react";
 import ProjectCard from "../components/ProjectCard";
 import CreateProjectDialog from "../components/CreateProjectDialog";
+import CreateWorkspaceDialog from "../components/CreateWorkspaceDialog";
 import useUserRole from "../hooks/useUserRole";
 
 // Stable empty array to prevent selector re-renders
@@ -10,6 +12,9 @@ const EMPTY_ARRAY = [];
 
 export default function Projects() {
     const { canCreateProjects } = useUserRole();
+
+    const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace);
+    const hasWorkspace = Boolean(currentWorkspace?.id);
     
     const projects = useSelector(
         (state) => state?.workspace?.currentWorkspace?.projects ?? EMPTY_ARRAY,
@@ -18,6 +23,7 @@ export default function Projects() {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
+    const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
     const [filters, setFilters] = useState({
         status: "ALL",
         priority: "ALL",
@@ -48,8 +54,30 @@ export default function Projects() {
         return filtered;
     }, [projects, searchTerm, filters]);
 
+    // Guard: if dialog opens without workspace, close it
+    const handleOpenCreateProject = () => {
+        if (!hasWorkspace) {
+            setShowCreateWorkspace(true);
+            return;
+        }
+        setIsDialogOpen(true);
+    };
+
     return (
         <div className="space-y-6 max-w-6xl mx-auto">
+            {/* No-workspace banner */}
+            {!hasWorkspace && (
+                <div className="flex items-center gap-3 p-4 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
+                    <AlertCircle className="size-5 shrink-0" />
+                    <div className="flex-1 text-sm">
+                        <span className="font-medium">No workspace found.</span> Create a workspace to get started.
+                    </div>
+                    <button onClick={() => setShowCreateWorkspace(true)} className="px-4 py-1.5 text-sm rounded bg-amber-600 text-white hover:bg-amber-700 transition whitespace-nowrap">
+                        Create Workspace
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                 <div>
@@ -57,9 +85,16 @@ export default function Projects() {
                     <p className="text-gray-500 dark:text-zinc-400 text-sm"> Manage and track your projects </p>
                 </div>
                 {canCreateProjects && (
-                    <button onClick={() => setIsDialogOpen(true)} className="flex items-center px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 text-white hover:opacity-90 transition" >
-                        <Plus className="size-4 mr-2" /> New Project
-                    </button>
+                    <div className="relative group">
+                        <button onClick={handleOpenCreateProject} disabled={!hasWorkspace} className={`flex items-center px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 text-white transition ${!hasWorkspace ? "opacity-50 cursor-not-allowed" : "hover:opacity-90"}`} >
+                            <Plus className="size-4 mr-2" /> New Project
+                        </button>
+                        {!hasWorkspace && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 text-xs rounded bg-zinc-800 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">
+                                Create a workspace first before adding projects
+                            </div>
+                        )}
+                    </div>
                 )}
                 <CreateProjectDialog isDialogOpen={isDialogOpen} setIsDialogOpen={setIsDialogOpen} />
             </div>
@@ -99,9 +134,9 @@ export default function Projects() {
                         <p className="text-gray-500 dark:text-zinc-400 mb-6 text-sm">
                             Create your first project to get started
                         </p>
-                        <button onClick={() => setIsDialogOpen(true)} className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded mx-auto text-sm" >
+                        <button onClick={handleOpenCreateProject} disabled={!hasWorkspace} className={`flex items-center gap-1.5 px-4 py-2 rounded mx-auto text-sm ${hasWorkspace ? "bg-blue-500 hover:bg-blue-600 text-white" : "bg-zinc-300 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 cursor-not-allowed"}`} >
                             <Plus className="size-4" />
-                            Create Project
+                            {hasWorkspace ? "Create Project" : "Create Workspace First"}
                         </button>
                     </div>
                 ) : (
@@ -110,6 +145,10 @@ export default function Projects() {
                     ))
                 )}
             </div>
+            {/* Create Workspace Dialog */}
+            {showCreateWorkspace && (
+                <CreateWorkspaceDialog isOpen={showCreateWorkspace} onClose={() => setShowCreateWorkspace(false)} />
+            )}
         </div>
     );
 }

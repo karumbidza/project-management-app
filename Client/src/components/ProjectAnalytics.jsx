@@ -1,17 +1,19 @@
+// FOLLO FIX
+// FOLLO WORKFLOW
 import { useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from "recharts";
 import { CheckCircle, Clock, AlertTriangle, Users, ArrowRightIcon } from "lucide-react";
 
 // Colors for charts and priorities
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 const PRIORITY_COLORS = {
-    LOW: "text-red-600 bg-red-200 dark:text-red-500 dark:bg-red-600",
-    MEDIUM: "text-blue-600 bg-blue-200 dark:text-blue-500 dark:bg-blue-600",
-    HIGH: "text-emerald-600 bg-emerald-200 dark:text-emerald-500 dark:bg-emerald-600",
+    CRITICAL: "text-red-600 bg-red-200 dark:text-red-500 dark:bg-red-600",
+    LOW: "text-green-600 bg-green-200 dark:text-green-500 dark:bg-green-600",
+    MEDIUM: "text-yellow-600 bg-yellow-200 dark:text-yellow-500 dark:bg-yellow-600",
+    HIGH: "text-orange-600 bg-orange-200 dark:text-orange-500 dark:bg-orange-600",
 };
 
 const ProjectAnalytics = ({ project, tasks }) => {
-    const { stats, statusData, typeData, priorityData } = useMemo(() => {
+    const { stats, statusData, priorityData } = useMemo(() => {
         const now = new Date();
         const total = tasks.length;
 
@@ -24,8 +26,7 @@ const ProjectAnalytics = ({ project, tasks }) => {
         };
 
         const statusMap = { TODO: 0, IN_PROGRESS: 0, DONE: 0 };
-        const typeMap = { TASK: 0, BUG: 0, FEATURE: 0, IMPROVEMENT: 0, OTHER: 0 };
-        const priorityMap = { LOW: 0, MEDIUM: 0, HIGH: 0 };
+        const priorityMap = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
 
         tasks.forEach((t) => {
             if (t.status === "DONE") stats.completed++;
@@ -34,14 +35,12 @@ const ProjectAnalytics = ({ project, tasks }) => {
             if (new Date(t.due_date) < now && t.status !== "DONE") stats.overdue++;
 
             if (statusMap[t.status] !== undefined) statusMap[t.status]++;
-            if (typeMap[t.type] !== undefined) typeMap[t.type]++;
             if (priorityMap[t.priority] !== undefined) priorityMap[t.priority]++;
         });
 
         return {
             stats,
             statusData: Object.entries(statusMap).map(([k, v]) => ({ name: k.replace("_", " "), value: v })),
-            typeData: Object.entries(typeMap).filter(([_, v]) => v > 0).map(([k, v]) => ({ name: k, value: v })),
             priorityData: Object.entries(priorityMap).map(([k, v]) => ({
                 name: k,
                 value: v,
@@ -87,9 +86,9 @@ const ProjectAnalytics = ({ project, tasks }) => {
         <div className="space-y-6">
             {/* Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {metrics.map((m, i) => (
+                {metrics.map((m) => (
                     <div
-                        key={i}
+                        key={m.label}
                         className="not-dark:bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-6"
                     >
                         <div className="flex items-center justify-between">
@@ -104,7 +103,7 @@ const ProjectAnalytics = ({ project, tasks }) => {
             </div>
 
             {/* Charts */}
-            <div className="grid lg:grid-cols-2 gap-6">
+            <div className="grid lg:grid-cols-1 gap-6">
                 {/* Tasks by Status */}
                 <div className="not-dark:bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-6">
                     <h2 className="text-zinc-900 dark:text-white mb-4 font-medium">Tasks by Status</h2>
@@ -119,28 +118,6 @@ const ProjectAnalytics = ({ project, tasks }) => {
                             <YAxis tick={{ fill: "#52525b", fontSize: 12 }} axisLine={{ stroke: "#d4d4d8" }} />
                             <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                         </BarChart>
-                    </ResponsiveContainer>
-                </div>
-
-                {/* Tasks by Type */}
-                <div className="not-dark:bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-6">
-                    <h2 className="text-zinc-900 dark:text-white mb-4 font-medium">Tasks by Type</h2>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                            <Pie
-                                data={typeData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                outerRadius={100}
-                                label={({ name, value }) => `${name}: ${value}`}
-                            >
-                                {typeData.map((_, i) => (
-                                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                                ))}
-                            </Pie>
-                        </PieChart>
                     </ResponsiveContainer>
                 </div>
             </div>

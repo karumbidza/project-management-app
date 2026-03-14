@@ -110,7 +110,7 @@ export const createTaskSchema = z.object({
     .optional()
     .nullable(),
   status: z.nativeEnum(TASK_STATUS).default(TASK_STATUS.TODO),
-  type: z.nativeEnum(TASK_TYPE).default(TASK_TYPE.TASK),
+  type: z.nativeEnum(TASK_TYPE).optional().nullable(), // FOLLO WORKFLOW — optional
   priority: z.nativeEnum(PRIORITY).default(PRIORITY.MEDIUM),
   assigneeId: z.string().optional().nullable(),
   due_date: z.string().optional().nullable(),
@@ -144,6 +144,7 @@ export const updateTaskSchema = z.object({
   delayDays: z.coerce.number().int().min(0).optional(),
   delayReason: z.string().max(500).optional().nullable(),
   sortOrder: z.coerce.number().int().optional(),
+  priorityOverride: z.boolean().optional(), // FOLLO WORKFLOW
 });
 
 export const taskIdParamSchema = z.object({
@@ -164,15 +165,41 @@ export const removeDependencySchema = z.object({
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// COMMENT SCHEMAS
+// COMMENT SCHEMAS (FOLLO MEDIA)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const commentTypeEnum = z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'FILE']).default('TEXT');
 
 export const createCommentSchema = z.object({
   content: z
     .string()
-    .min(1, 'Comment content is required')
     .max(LIMITS.COMMENT_MAX_LENGTH, `Comment must be less than ${LIMITS.COMMENT_MAX_LENGTH} characters`)
-    .trim(),
+    .trim()
+    .optional()
+    .nullable(),
+  type: commentTypeEnum,
+  // Media fields (optional - only for media comments)
+  url: z.string().url().optional().nullable(),
+  fileKey: z.string().optional().nullable(),
+  thumbnailUrl: z.string().url().optional().nullable(),
+  duration: z.number().positive().optional().nullable(),
+  sizeBytes: z.number().int().positive().optional().nullable(),
+  fileName: z.string().optional().nullable(),
+  muxUploadId: z.string().optional().nullable(),
+  muxAssetId: z.string().optional().nullable(),
+  muxPlaybackId: z.string().optional().nullable(),
+}).refine((data) => {
+  // Text comments must have content
+  if (data.type === 'TEXT' && (!data.content || data.content.length === 0)) {
+    return false;
+  }
+  // Media comments must have URL
+  if (['IMAGE', 'VIDEO', 'AUDIO', 'FILE'].includes(data.type) && !data.url) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Text comments require content, media comments require url',
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

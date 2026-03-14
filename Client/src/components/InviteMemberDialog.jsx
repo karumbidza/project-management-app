@@ -1,9 +1,11 @@
-import { useState } from "react";
+// FOLLO FIX
+import { useState, useEffect } from "react";
 import { Mail, UserPlus, Building2, FolderOpen, Loader2 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth, useOrganization } from "@clerk/clerk-react";
 import { addProjectMemberAsync } from "../features/workspaceSlice";
 import toast from "react-hot-toast";
+import LoadingButton from "./ui/LoadingButton";
 
 const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
     const dispatch = useDispatch();
@@ -81,6 +83,14 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
             setIsSubmitting(false);
         }
     };
+
+    // Close on Escape key
+    useEffect(() => {
+        if (!isDialogOpen) return;
+        const h = (e) => { if (e.key === 'Escape') setIsDialogOpen(false); };
+        document.addEventListener('keydown', h);
+        return () => document.removeEventListener('keydown', h);
+    }, [isDialogOpen, setIsDialogOpen]);
 
     if (!isDialogOpen) return null;
 
@@ -219,20 +229,14 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
                         >
                             Cancel
                         </button>
-                        <button 
+                        <LoadingButton 
                             type="submit" 
-                            disabled={isSubmitting || !currentWorkspace || (inviteType === "project" && !formData.projectId)} 
+                            loading={isSubmitting}
+                            disabled={!currentWorkspace || (inviteType === "project" && !formData.projectId)} 
                             className="px-5 py-2 rounded text-sm bg-gradient-to-br from-blue-500 to-blue-600 text-white disabled:opacity-50 hover:opacity-90 transition flex items-center gap-2"
                         >
-                            {isSubmitting ? (
-                                <>
-                                    <Loader2 className="size-4 animate-spin" />
-                                    Adding...
-                                </>
-                            ) : (
-                                <>Add Member</>
-                            )}
-                        </button>
+                            Add Member
+                        </LoadingButton>
                     </div>
                 </form>
             </div>

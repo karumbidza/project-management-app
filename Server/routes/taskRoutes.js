@@ -15,6 +15,7 @@ import {
   removeTaskDependency,
   getTaskDependencies,
   getTaskActivities,
+  recalculateTaskPriority,
 } from "../controllers/taskController.js";
 import { 
   validate, 
@@ -55,6 +56,9 @@ router.put("/:taskId", validate(updateTaskSchema), updateTask);
 
 // DELETE /api/v1/tasks/:taskId - Delete task
 router.delete("/:taskId", deleteTask);
+
+// FOLLO WORKFLOW — recalculate priority for a task
+router.post("/:taskId/recalculate-priority", recalculateTaskPriority);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TASK DEPENDENCY ROUTES

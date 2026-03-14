@@ -1,9 +1,11 @@
-import { useState } from 'react';
+// FOLLO FIX
+import { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { useOrganizationList, useAuth } from '@clerk/clerk-react';
 import { useDispatch } from 'react-redux';
 import { fetchWorkspaces } from '../features/workspaceSlice';
 import toast from 'react-hot-toast';
+import LoadingButton from './ui/LoadingButton';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -40,6 +42,7 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
                     id: organization.id,
                     name: organization.name,
                     slug: organization.slug,
+                    description: description.trim() || null,
                     ownerId: userId,
                     image_url: organization.imageUrl,
                 }),
@@ -62,6 +65,14 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
             setLoading(false);
         }
     };
+
+    // Close on Escape key
+    useEffect(() => {
+        if (!isOpen) return;
+        const h = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', h);
+        return () => document.removeEventListener('keydown', h);
+    }, [isOpen, onClose]);
 
     if (!isOpen) return null;
 
@@ -113,20 +124,14 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
                         >
                             Cancel
                         </button>
-                        <button
+                        <LoadingButton
                             type="submit"
-                            disabled={loading || !name.trim()}
+                            loading={loading}
+                            disabled={!name.trim()}
                             className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                            {loading ? (
-                                <>
-                                    <Loader2 size={16} className="animate-spin" />
-                                    Creating...
-                                </>
-                            ) : (
-                                'Create Workspace'
-                            )}
-                        </button>
+                            Create Workspace
+                        </LoadingButton>
                     </div>
                 </form>
             </div>

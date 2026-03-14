@@ -1,10 +1,12 @@
-import { useState } from "react";
+// FOLLO FIX
+import { useState, useEffect } from "react";
 import { Mail, UserPlus, Shield } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
 import { addProjectMemberAsync } from "../features/workspaceSlice";
+import LoadingButton from "./ui/LoadingButton";
 
 const PROJECT_ROLES = [
     { value: 'CONTRIBUTOR', label: 'Contributor', description: 'Can create and edit tasks' },
@@ -57,6 +59,14 @@ const AddProjectMember = ({ isDialogOpen, setIsDialogOpen }) => {
     const availableMembers = currentWorkspace?.members?.filter(
         (member) => !projectMemberUserIds.includes(member.user?.id || member.userId)
     ) || [];
+
+    // Close on Escape key
+    useEffect(() => {
+        if (!isDialogOpen) return;
+        const h = (e) => { if (e.key === 'Escape') setIsDialogOpen(false); };
+        document.addEventListener('keydown', h);
+        return () => document.removeEventListener('keydown', h);
+    }, [isDialogOpen, setIsDialogOpen]);
 
     if (!isDialogOpen) return null;
 
@@ -146,13 +156,14 @@ const AddProjectMember = ({ isDialogOpen, setIsDialogOpen }) => {
                         >
                             Cancel
                         </button>
-                        <button 
+                        <LoadingButton 
                             type="submit" 
-                            disabled={loadingStates.members || !email || availableMembers.length === 0} 
+                            loading={loadingStates.members}
+                            disabled={!email || availableMembers.length === 0} 
                             className="px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 hover:opacity-90 text-white disabled:opacity-50 transition" 
                         >
-                            {loadingStates.members ? "Adding..." : "Add Member"}
-                        </button>
+                            Add Member
+                        </LoadingButton>
                     </div>
                 </form>
             </div>

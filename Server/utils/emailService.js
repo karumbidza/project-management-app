@@ -1,3 +1,4 @@
+// FOLLO FIX
 import 'dotenv/config';
 import { Resend } from 'resend';
 
@@ -289,6 +290,58 @@ const templates = {
             </html>
         `,
     }),
+
+    // New comment notification
+    newComment: ({ recipientName, commenterName, taskTitle, projectName, commentPreview, taskUrl, isMedia }) => ({
+        subject: `💬 New ${isMedia ? 'media' : 'comment'} on "${taskTitle}"`,
+        html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 20px;">
+                <div style="max-width: 560px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                    <div style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 32px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">New ${isMedia ? 'Media Shared' : 'Comment'} 💬</h1>
+                    </div>
+                    <div style="padding: 32px;">
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+                            Hi ${recipientName},
+                        </p>
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 24px;">
+                            <strong>${commenterName}</strong> ${isMedia ? 'shared media' : 'commented'} on a task you're involved with:
+                        </p>
+                        <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 0 0 24px;">
+                            <h2 style="color: #111827; font-size: 16px; margin: 0 0 8px;">${taskTitle}</h2>
+                            <p style="color: #6b7280; font-size: 14px; margin: 0 0 12px;">
+                                <strong>Project:</strong> ${projectName}
+                            </p>
+                            ${commentPreview ? `
+                            <div style="background: white; border-left: 3px solid #6366f1; padding: 12px 16px; margin-top: 12px;">
+                                <p style="color: #374151; font-size: 14px; margin: 0; font-style: italic;">
+                                    "${commentPreview.length > 150 ? commentPreview.substring(0, 150) + '...' : commentPreview}"
+                                </p>
+                            </div>
+                            ` : ''}
+                        </div>
+                        <div style="text-align: center;">
+                            <a href="${taskUrl}" style="display: inline-block; background: #6366f1; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                                View Discussion
+                            </a>
+                        </div>
+                    </div>
+                    <div style="background: #f9fafb; padding: 20px 32px; text-align: center; border-top: 1px solid #e5e7eb;">
+                        <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                            ${appName} • Collaborative Project Management
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `,
+    }),
 };
 
 // Email sending functions
@@ -340,6 +393,38 @@ export const emailService = {
         const template = templates.welcome({ userName, workspaceName });
         return sendEmail({ to, ...template });
     },
+
+    /**
+     * Send comment notification to project members
+     */
+    async sendCommentNotification({ to, recipientName, commenterName, taskTitle, projectName, commentPreview, taskUrl, isMedia }) {
+        const template = templates.newComment({ recipientName, commenterName, taskTitle, projectName, commentPreview, taskUrl, isMedia });
+        return sendEmail({ to, ...template });
+    },
+
+    /**
+     * Send comment notifications to multiple recipients (batch)
+     */
+    async sendBatchCommentNotifications(recipients, { commenterName, taskTitle, projectName, commentPreview, taskUrl, isMedia }) {
+        const results = await Promise.allSettled(
+            recipients.map(({ email, name }) => 
+                this.sendCommentNotification({
+                    to: email,
+                    recipientName: name,
+                    commenterName,
+                    taskTitle,
+                    projectName,
+                    commentPreview,
+                    taskUrl,
+                    isMedia,
+                })
+            )
+        );
+        
+        const successful = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+        console.info(`[Email] Batch comment notifications: ${successful}/${recipients.length} sent`);
+        return { sent: successful, total: recipients.length };
+    },
 };
 
 /**
@@ -359,7 +444,7 @@ async function sendEmail({ to, subject, html }) {
             return { success: false, error: result.error };
         }
 
-        console.info(`[Email] Sent "${subject}" to ${to}`);
+        console.info(`[Email] Sent "${subject}" successfully`);
         return { success: true, id: result.data?.id };
     } catch (error) {
         console.error('[Email] Error:', error);

@@ -1,9 +1,13 @@
+// FOLLO FIX
+// FOLLO SLA
 import { Inngest } from "inngest";
 import prisma from "../configs/prisma.js";
 import emailService from "../utils/emailService.js";
+import { inngest } from "./client.js";
+import { slaFunctions } from "./slaJobs.js";
 
-// Create a client to send and receive events
-export const inngest = new Inngest({ id: "project-management" });
+// Re-export the shared client so existing imports (`from './inngest/index.js'`) keep working
+export { inngest };
 
 
 //ingest Function to save user data to the database when a user is created in Clerk
@@ -62,14 +66,14 @@ const syncUserCreation = inngest.createFunction(
                         },
                     });
 
-                    console.info(`[Inngest] Processed invitation: ${email} → ${invitation.project.name}`);
+                    console.info(`[Inngest] Processed invitation for user ${user.id} → ${invitation.project.name}`);
                 } catch (error) {
                     console.error(`[Inngest] Failed to process invitation ${invitation.id}:`, error);
                 }
             }
 
             if (pendingInvitations.length > 0) {
-                console.info(`[Inngest] Processed ${pendingInvitations.length} invitations for ${email}`);
+                console.info(`[Inngest] Processed ${pendingInvitations.length} invitations for user ${user.id}`);
             }
         }
     }
@@ -257,7 +261,7 @@ const sendTaskDueReminders = inngest.createFunction(
                         projectName: task.project.name,
                         dueDate: formatDate(task.dueDate),
                     });
-                    console.info(`[Inngest] Sent due reminder for task "${task.title}" to ${task.assignee.email}`);
+                    console.info(`[Inngest] Sent due reminder for task "${task.title}" to assignee ${task.assigneeId}`);
                 } catch (error) {
                     console.error(`[Inngest] Failed to send reminder for task ${task.id}:`, error);
                 }
@@ -325,7 +329,7 @@ const sendOverdueTaskNotifications = inngest.createFunction(
                         dueDate: formatDate(task.dueDate),
                         daysOverdue,
                     });
-                    console.info(`[Inngest] Sent overdue notification for task "${task.title}" (${daysOverdue} days) to ${task.assignee.email}`);
+                    console.info(`[Inngest] Sent overdue notification for task "${task.title}" (${daysOverdue} days) to assignee ${task.assigneeId}`);
                 } catch (error) {
                     console.error(`[Inngest] Failed to send overdue notification for task ${task.id}:`, error);
                 }
@@ -348,4 +352,6 @@ export const functions = [
     // Scheduled reminders
     sendTaskDueReminders,
     sendOverdueTaskNotifications,
+    // SLA jobs (FOLLO SLA)
+    ...slaFunctions,
 ];

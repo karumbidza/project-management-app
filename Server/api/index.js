@@ -1,3 +1,4 @@
+// FOLLO FIX
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
@@ -45,7 +46,7 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    return callback(null, true); // Allow all origins for now during development
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true
 }));
@@ -87,8 +88,8 @@ app.get('/api/workspaces', async (req, res) => {
     const workspaces = await prisma.workspace.findMany();
     res.json(workspaces);
   } catch (error) {
-    console.error('Error fetching workspaces:', error);
-    res.status(500).json({ error: 'Failed to fetch workspaces', details: error.message });
+    console.error('Error fetching workspaces:', error.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -101,8 +102,8 @@ app.get('/api/projects', async (req, res) => {
     const projects = await prisma.project.findMany();
     res.json(projects);
   } catch (error) {
-    console.error('Error fetching projects:', error);
-    res.status(500).json({ error: 'Failed to fetch projects', details: error.message });
+    console.error('Error fetching projects:', error.message);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 

@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+// FOLLO FIX
+import { useEffect, useState, useCallback } from 'react';
 import { CheckSquareIcon, ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 
 function MyTasksSidebar() {
 
-    const user = { id: 'user_1' }
+    const { userId } = useAuth();
 
     const { currentWorkspace } = useSelector((state) => state.workspace);
     const [showMyTasks, setShowMyTasks] = useState(false);
@@ -26,20 +28,21 @@ function MyTasksSidebar() {
         }
     };
 
-    const fetchUserTasks = () => {
-        const userId = user?.id || '';
+    const fetchUserTasks = useCallback(() => {
         if (!userId || !currentWorkspace) return;
         const projects = currentWorkspace.projects || [];
         const currentWorkspaceTasks = projects.flatMap((project) => {
-            return (project.tasks || []).filter((task) => task?.assignee?.id === userId);
+            return (project.tasks || [])
+                .filter((task) => task?.assignee?.id === userId)
+                .map((task) => ({ ...task, projectId: task.projectId || project.id }));
         });
 
         setMyTasks(currentWorkspaceTasks);
-    }
+    }, [userId, currentWorkspace]);
 
     useEffect(() => {
-        fetchUserTasks()
-    }, [currentWorkspace])
+        fetchUserTasks();
+    }, [fetchUserTasks])
 
     return (
         <div className="mt-6 px-3">
@@ -66,8 +69,8 @@ function MyTasksSidebar() {
                                 No tasks assigned
                             </div>
                         ) : (
-                            myTasks.map((task, index) => (
-                                <Link key={index} to={`/taskDetails?projectId=${task.projectId}&taskId=${task.id}`} className="w-full rounded-lg transition-all duration-200 text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white" >
+                            myTasks.map((task) => (
+                                <Link key={task.id} to={`/taskDetails?projectId=${task.projectId}&taskId=${task.id}`} className="w-full rounded-lg transition-all duration-200 text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-black dark:hover:text-white" >
                                     <div className="flex items-center gap-2 px-3 py-2 w-full min-w-0">
                                         <div className={`w-2 h-2 rounded-full ${getTaskStatusColor(task.status)} flex-shrink-0`} />
                                         <div className="flex-1 min-w-0">

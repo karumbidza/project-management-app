@@ -1,15 +1,8 @@
+// FOLLO WORKFLOW
 import { useEffect, useState } from "react";
-import { GitCommit, MessageSquare, Clock, Bug, Zap, Square } from "lucide-react";
+import { Clock, Activity } from "lucide-react";
 import { format } from "date-fns";
 import { useSelector } from "react-redux";
-
-const typeIcons = {
-    BUG: { icon: Bug, color: "text-red-500 dark:text-red-400" },
-    FEATURE: { icon: Zap, color: "text-blue-500 dark:text-blue-400" },
-    TASK: { icon: Square, color: "text-green-500 dark:text-green-400" },
-    IMPROVEMENT: { icon: MessageSquare, color: "text-amber-500 dark:text-amber-400" },
-    OTHER: { icon: GitCommit, color: "text-purple-500 dark:text-purple-400" },
-};
 
 const statusColors = {
     TODO: "bg-zinc-200 text-zinc-800 dark:bg-zinc-600 dark:text-zinc-200",
@@ -50,15 +43,12 @@ const RecentActivity = () => {
                     </div>
                 ) : (
                     <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                        {tasks.map((task) => {
-                            const TypeIcon = typeIcons[task.type]?.icon || Square;
-                            const iconColor = typeIcons[task.type]?.color || "text-gray-500 dark:text-gray-400";
-
+                        {tasks.filter(task => task && task.id).map((task, index) => {
                             return (
-                                <div key={task.id} className="p-6 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
+                                <div key={task.id || `task-${index}`} className="p-6 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
                                     <div className="flex items-start gap-4">
                                         <div className="p-2 bg-zinc-200 dark:bg-zinc-800 rounded-lg">
-                                            <TypeIcon className={`w-4 h-4 ${iconColor}`} />
+                                            <Activity className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-start justify-between mb-2">
@@ -66,12 +56,11 @@ const RecentActivity = () => {
                                                     {task.title}
                                                 </h4>
                                                 <span className={`ml-2 px-2 py-1 rounded text-xs ${statusColors[task.status] || "bg-zinc-300 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300"}`}>
-                                                    {task.status.replace("_", " ")}
+                                                    {(task.status || "unknown").replace("_", " ")}
                                                 </span>
                                             </div>
                                             <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
-                                                <span className="capitalize">{task.type.toLowerCase()}</span>
-                                                {task.assignee && (
+                                                {task.assignee?.name && (
                                                     <div className="flex items-center gap-1">
                                                         <div className="w-4 h-4 bg-zinc-300 dark:bg-zinc-700 rounded-full flex items-center justify-center text-[10px] text-zinc-800 dark:text-zinc-200">
                                                             {task.assignee.name[0].toUpperCase()}
@@ -80,7 +69,9 @@ const RecentActivity = () => {
                                                     </div>
                                                 )}
                                                 <span>
-                                                    {format(new Date(task.updatedAt), "MMM d, h:mm a")}
+                                                    {task.updatedAt && !isNaN(new Date(task.updatedAt)) 
+                                                        ? format(new Date(task.updatedAt), "MMM d, h:mm a")
+                                                        : "—"}
                                                 </span>
                                             </div>
                                         </div>

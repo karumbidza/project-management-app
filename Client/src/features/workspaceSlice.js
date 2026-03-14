@@ -1,52 +1,26 @@
+// FOLLO AUTH-FIX
+// FOLLO SRP
+// FOLLO FIX
+// FOLLO PERMISSIONS
+// FOLLO WORKFLOW
+// FOLLO REALTIME
+// FOLLO BUGFIX-REFRESH
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
+import { apiCall, API_V1 } from "./apiHelper";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-const API_V1 = `${API_URL}/api/v1`;
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// API HELPER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-/**
- * Helper to make API calls with envelope handling
- */
-const apiCall = async (url, options, getToken) => {
-    const token = await getToken();
-    console.log('[apiCall] Fetching:', url);
-    const response = await fetch(url, {
-        ...options,
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            ...(options?.headers || {}),
-        },
-    });
-    
-    console.log('[apiCall] Response status:', response.status);
-    
-    // Handle 204 No Content
-    if (response.status === 204) {
-        return { success: true, data: null };
-    }
-    
-    const result = await response.json();
-    console.log('[apiCall] Result:', result);
-    
-    // Handle new envelope format
-    if (result.hasOwnProperty('success')) {
-        if (!result.success) {
-            throw new Error(result.error?.message || 'Request failed');
-        }
-        return result;
-    }
-    
-    // Handle legacy format (backward compatibility)
-    if (!response.ok) {
-        throw new Error(result.error || 'Request failed');
-    }
-    
-    return { success: true, data: result };
-};
+// ━━━ Cross-slice imports (for extraReducers) ━━━
+import {
+    createTaskAsync, updateTaskAsync, deleteTaskAsync,
+    addTaskDependencyAsync, removeTaskDependencyAsync,
+    addTaskToProject, updateTaskInProject,
+} from "./taskSlice";
+import { addCommentAsync } from "./commentSlice";
+import {
+    submitTaskAsync, approveTaskAsync, rejectTaskAsync,
+    raiseBlockerAsync, resolveBlockerAsync,
+    fetchTaskSlaAsync,
+    requestExtensionAsync, approveExtensionAsync, denyExtensionAsync,
+} from "./slaSlice";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // WORKSPACE THUNKS
@@ -57,11 +31,8 @@ export const fetchWorkspaces = createAsyncThunk(
     async (getToken, { rejectWithValue }) => {
         try {
             const result = await apiCall(`${API_V1}/workspaces`, {}, getToken);
-            console.log('[fetchWorkspaces] API result:', result);
-            console.log('[fetchWorkspaces] result.data:', result.data);
             return result.data;
         } catch (error) {
-            console.error('[fetchWorkspaces] Error:', error);
             return rejectWithValue(error.message);
         }
     }
@@ -123,10 +94,8 @@ export const fetchMyProjects = createAsyncThunk(
     async (getToken, { rejectWithValue }) => {
         try {
             const result = await apiCall(`${API_V1}/projects/my-projects`, {}, getToken);
-            console.log('[fetchMyProjects] API result:', result);
             return result.data;
         } catch (error) {
-            console.error('[fetchMyProjects] Error:', error);
             return rejectWithValue(error.message);
         }
     }
@@ -237,124 +206,14 @@ export const removeProjectMemberAsync = createAsyncThunk(
     }
 );
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TASK THUNKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const fetchProjectTasksAsync = createAsyncThunk(
-    'workspace/fetchProjectTasks',
-    async ({ projectId, getToken }, { rejectWithValue }) => {
+export const toggleProjectMemberAsync = createAsyncThunk(
+    'workspace/toggleProjectMember',
+    async ({ projectId, memberId, getToken }, { rejectWithValue }) => {
         try {
-            const result = await apiCall(`${API_V1}/tasks/project/${projectId}`, {}, getToken);
-            return { projectId, tasks: result.data };
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-export const createTaskAsync = createAsyncThunk(
-    'workspace/createTask',
-    async ({ projectId, taskData, getToken }, { rejectWithValue }) => {
-        try {
-            const result = await apiCall(`${API_V1}/tasks/project/${projectId}`, {
-                method: 'POST',
-                body: JSON.stringify(taskData),
-            }, getToken);
-            return result.data;
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-export const updateTaskAsync = createAsyncThunk(
-    'workspace/updateTask',
-    async ({ taskId, taskData, getToken }, { rejectWithValue }) => {
-        try {
-            const result = await apiCall(`${API_V1}/tasks/${taskId}`, {
+            const result = await apiCall(`${API_V1}/projects/${projectId}/members/${memberId}/toggle`, {
                 method: 'PATCH',
-                body: JSON.stringify(taskData),
             }, getToken);
-            return result.data;
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-export const deleteTaskAsync = createAsyncThunk(
-    'workspace/deleteTask',
-    async ({ taskId, projectId, getToken }, { rejectWithValue }) => {
-        try {
-            await apiCall(`${API_V1}/tasks/${taskId}`, {
-                method: 'DELETE',
-            }, getToken);
-            return { taskId, projectId };
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TASK DEPENDENCY THUNKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const fetchTaskDependenciesAsync = createAsyncThunk(
-    'workspace/fetchTaskDependencies',
-    async ({ taskId, getToken }, { rejectWithValue }) => {
-        try {
-            const result = await apiCall(`${API_V1}/tasks/${taskId}/dependencies`, {}, getToken);
-            return { taskId, dependencies: result.data };
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-export const addTaskDependencyAsync = createAsyncThunk(
-    'workspace/addTaskDependency',
-    async ({ taskId, predecessorId, lagDays, getToken }, { rejectWithValue }) => {
-        try {
-            const result = await apiCall(`${API_V1}/tasks/${taskId}/dependencies`, {
-                method: 'POST',
-                body: JSON.stringify({ predecessorId, lagDays }),
-            }, getToken);
-            return { taskId, dependency: result.data };
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-export const removeTaskDependencyAsync = createAsyncThunk(
-    'workspace/removeTaskDependency',
-    async ({ taskId, dependencyId, getToken }, { rejectWithValue }) => {
-        try {
-            await apiCall(`${API_V1}/tasks/${taskId}/dependencies/${dependencyId}`, {
-                method: 'DELETE',
-            }, getToken);
-            return { taskId, dependencyId };
-        } catch (error) {
-            return rejectWithValue(error.message);
-        }
-    }
-);
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// TASK COMMENT THUNKS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const addCommentAsync = createAsyncThunk(
-    'workspace/addComment',
-    async ({ taskId, commentData, getToken }, { rejectWithValue }) => {
-        try {
-            const result = await apiCall(`${API_V1}/tasks/${taskId}/comments`, {
-                method: 'POST',
-                body: JSON.stringify(commentData),
-            }, getToken);
-            return { taskId, comment: result.data };
+            return { projectId, member: result.data };
         } catch (error) {
             return rejectWithValue(error.message);
         }
@@ -393,6 +252,24 @@ const workspaceSlice = createSlice({
     name: "workspace",
     initialState,
     reducers: {
+        // FOLLO AUTH-FIX — reset all state when userId changes (account switch)
+        clearWorkspaceState: (state) => {
+            state.workspaces = [];
+            state.currentWorkspace = null;
+            state.myProjects = [];
+            state.currentProject = null;
+            state.isMemberView = false;
+            state.loading = false;
+            state.error = null;
+            state.loadingStates = {
+                workspaces: false,
+                projects: false,
+                myProjects: false,
+                tasks: false,
+                members: false,
+                dependencies: false,
+            };
+        },
         setWorkspaces: (state, action) => {
             state.workspaces = action.payload;
         },
@@ -476,6 +353,41 @@ const workspaceSlice = createSlice({
     },
     extraReducers: (builder) => {
         builder
+            // ━━━ Realtime sync actions (from taskSlice) ━━━
+            .addCase(addTaskToProject, (state, action) => {
+                const task = action.payload;
+                const addToProject = (p) => {
+                    if (p.id !== task.projectId) return p;
+                    const exists = (p.tasks || []).some(t => t.id === task.id);
+                    if (exists) return p;
+                    return { ...p, tasks: [...(p.tasks || []), task] };
+                };
+                if (state.currentWorkspace) {
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map(addToProject);
+                }
+                if (state.myProjects.length > 0) {
+                    state.myProjects = state.myProjects.map(addToProject);
+                }
+            })
+            .addCase(updateTaskInProject, (state, action) => {
+                const updatedTask = action.payload;
+                const patchTask = (p) => {
+                    if (p.id !== updatedTask.projectId) return p;
+                    return {
+                        ...p,
+                        tasks: (p.tasks || []).map(t =>
+                            t.id === updatedTask.id ? updatedTask : t
+                        ),
+                    };
+                };
+                if (state.currentWorkspace) {
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map(patchTask);
+                }
+                if (state.myProjects.length > 0) {
+                    state.myProjects = state.myProjects.map(patchTask);
+                }
+            })
+
             // ━━━ Fetch Workspaces ━━━
             .addCase(fetchWorkspaces.pending, (state) => {
                 state.loadingStates.workspaces = true;
@@ -485,10 +397,9 @@ const workspaceSlice = createSlice({
                 state.loadingStates.workspaces = false;
                 state.workspaces = action.payload || [];
                 
-                // If user has workspaces, they are NOT in member-only view
-                if (action.payload?.length > 0) {
-                    state.isMemberView = false;
-                }
+                // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
+                // Only disable member view if user is ADMIN/OWNER in some workspace.
+                // Non-admin workspace members should stay in member view.
                 
                 const savedWorkspaceId = localStorage.getItem("currentWorkspaceId");
                 if (savedWorkspaceId && action.payload?.find(w => w.id === savedWorkspaceId)) {
@@ -501,6 +412,7 @@ const workspaceSlice = createSlice({
             .addCase(fetchWorkspaces.rejected, (state, action) => {
                 state.loadingStates.workspaces = false;
                 state.error = action.payload;
+                console.error('[Workspace] fetchWorkspaces rejected:', action.payload); // FOLLO BUGFIX-REFRESH
             })
             
             // ━━━ Fetch My Projects (for members without workspace access) ━━━
@@ -512,21 +424,16 @@ const workspaceSlice = createSlice({
                 state.loadingStates.myProjects = false;
                 state.myProjects = action.payload || [];
                 
-                // Only enable member view if:
-                // 1. User has projects 
-                // 2. User has NO workspaces
-                // 3. Workspaces have finished loading (not pending)
-                const hasNoWorkspaces = state.workspaces.length === 0 && !state.loadingStates.workspaces;
+                // FOLLO BUGFIX-REFRESH: Don't set isMemberView here — the reducer
+                // has no access to userId so it can't determine admin status.
+                // useUserRole() hook is the single source of truth for member view.
                 const hasProjects = action.payload?.length > 0;
                 
-                if (hasProjects && hasNoWorkspaces) {
-                    state.isMemberView = true;
-                    
-                    // Set current project for member view
+                if (hasProjects) {
                     const savedProjectId = localStorage.getItem("currentProjectId");
                     if (savedProjectId && action.payload?.find(p => p.id === savedProjectId)) {
                         state.currentProject = action.payload.find(p => p.id === savedProjectId);
-                    } else if (action.payload?.length > 0) {
+                    } else if (!state.currentProject && action.payload?.length > 0) {
                         state.currentProject = action.payload[0];
                         localStorage.setItem("currentProjectId", action.payload[0].id);
                     }
@@ -535,6 +442,7 @@ const workspaceSlice = createSlice({
             .addCase(fetchMyProjects.rejected, (state, action) => {
                 state.loadingStates.myProjects = false;
                 state.error = action.payload;
+                console.error('[Workspace] fetchMyProjects rejected:', action.payload); // FOLLO BUGFIX-REFRESH
             })
             
             // ━━━ Create Workspace ━━━
@@ -692,6 +600,18 @@ const workspaceSlice = createSlice({
                     );
                 }
             })
+
+            // ━━━ Toggle Project Member Active ━━━
+            .addCase(toggleProjectMemberAsync.fulfilled, (state, action) => {
+                const { projectId, member } = action.payload;
+                if (state.currentWorkspace) {
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map((p) =>
+                        p.id === projectId
+                            ? { ...p, members: p.members.map((m) => m.id === member.id ? member : m) }
+                            : p
+                    );
+                }
+            })
             
             // ━━━ Create Task ━━━
             .addCase(createTaskAsync.pending, (state) => {
@@ -700,12 +620,12 @@ const workspaceSlice = createSlice({
             .addCase(createTaskAsync.fulfilled, (state, action) => {
                 state.loadingStates.tasks = false;
                 const task = action.payload;
+                const addTask = (p) => p.id === task.projectId ? { ...p, tasks: [...(p.tasks || []), task] } : p;
                 if (state.currentWorkspace) {
-                    state.currentWorkspace.projects = state.currentWorkspace.projects.map((p) => 
-                        p.id === task.projectId 
-                            ? { ...p, tasks: [...(p.tasks || []), task] } 
-                            : p
-                    );
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map(addTask);
+                }
+                if (state.myProjects.length > 0) {
+                    state.myProjects = state.myProjects.map(addTask);
                 }
             })
             .addCase(createTaskAsync.rejected, (state, action) => {
@@ -720,12 +640,12 @@ const workspaceSlice = createSlice({
             .addCase(updateTaskAsync.fulfilled, (state, action) => {
                 state.loadingStates.tasks = false;
                 const updatedTask = action.payload;
+                const patchTask = (p) => p.id === updatedTask.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === updatedTask.id ? updatedTask : t) } : p;
                 if (state.currentWorkspace) {
-                    state.currentWorkspace.projects = state.currentWorkspace.projects.map((p) => 
-                        p.id === updatedTask.projectId 
-                            ? { ...p, tasks: p.tasks.map(t => t.id === updatedTask.id ? updatedTask : t) } 
-                            : p
-                    );
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map(patchTask);
+                }
+                if (state.myProjects.length > 0) {
+                    state.myProjects = state.myProjects.map(patchTask);
                 }
             })
             .addCase(updateTaskAsync.rejected, (state, action) => {
@@ -736,12 +656,12 @@ const workspaceSlice = createSlice({
             // ━━━ Delete Task ━━━
             .addCase(deleteTaskAsync.fulfilled, (state, action) => {
                 const { taskId, projectId } = action.payload;
+                const removeTask = (p) => p.id === projectId ? { ...p, tasks: (p.tasks || []).filter((t) => t.id !== taskId) } : p;
                 if (state.currentWorkspace) {
-                    state.currentWorkspace.projects = state.currentWorkspace.projects.map((p) =>
-                        p.id === projectId 
-                            ? { ...p, tasks: (p.tasks || []).filter((t) => t.id !== taskId) }
-                            : p
-                    );
+                    state.currentWorkspace.projects = state.currentWorkspace.projects.map(removeTask);
+                }
+                if (state.myProjects.length > 0) {
+                    state.myProjects = state.myProjects.map(removeTask);
                 }
             })
             
@@ -787,31 +707,135 @@ const workspaceSlice = createSlice({
             })
             
             // ━━━ Add Comment ━━━
+            // Note: TaskDetails uses local state for comments, so no Redux state update needed here.
+            // We only track loading granularly to avoid affecting unrelated UI.
             .addCase(addCommentAsync.pending, (state) => {
-                state.loading = true;
+                state.loadingStates.tasks = true;
             })
-            .addCase(addCommentAsync.fulfilled, (state, action) => {
-                state.loading = false;
-                const { taskId, comment } = action.payload;
-                if (state.currentWorkspace) {
-                    state.currentWorkspace.projects = state.currentWorkspace.projects.map((p) => ({
-                        ...p,
-                        tasks: (p.tasks || []).map((t) =>
-                            t.id === taskId 
-                                ? { ...t, comments: [...(t.comments || []), comment] }
-                                : t
-                        ),
-                    }));
-                }
+            .addCase(addCommentAsync.fulfilled, (state) => {
+                state.loadingStates.tasks = false;
             })
             .addCase(addCommentAsync.rejected, (state, action) => {
-                state.loading = false;
+                state.loadingStates.tasks = false;
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Submit Task ━━━
+            .addCase(submitTaskAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(submitTaskAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Approve Task ━━━
+            .addCase(approveTaskAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(approveTaskAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Reject Task ━━━
+            .addCase(rejectTaskAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(rejectTaskAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Raise Blocker ━━━
+            .addCase(raiseBlockerAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(raiseBlockerAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Resolve Blocker ━━━
+            .addCase(resolveBlockerAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(resolveBlockerAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+            
+            // ━━━ SLA: Fetch Task SLA ━━━
+            .addCase(fetchTaskSlaAsync.fulfilled, () => {
+                // SLA data is consumed directly by components via unwrap(), not stored in slice state
+            })
+            .addCase(fetchTaskSlaAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+
+            // ━━━ FOLLO WORKFLOW: Request Extension ━━━
+            .addCase(requestExtensionAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(requestExtensionAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+
+            // ━━━ FOLLO WORKFLOW: Approve Extension ━━━
+            .addCase(approveExtensionAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(approveExtensionAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+
+            // ━━━ FOLLO WORKFLOW: Deny Extension ━━━
+            .addCase(denyExtensionAsync.fulfilled, (state, action) => {
+                const task = action.payload;
+                if (task) {
+                    const merge = (p) => p.id === task.projectId ? { ...p, tasks: (p.tasks || []).map(t => t.id === task.id ? { ...t, ...task } : t) } : p;
+                    if (state.currentWorkspace) state.currentWorkspace.projects = state.currentWorkspace.projects.map(merge);
+                    if (state.myProjects.length > 0) state.myProjects = state.myProjects.map(merge);
+                }
+            })
+            .addCase(denyExtensionAsync.rejected, (state, action) => {
                 state.error = action.payload;
             });
     }
 });
 
 export const { 
+    clearWorkspaceState,
     setWorkspaces, 
     setCurrentWorkspace,
     setMyProjects,
@@ -824,7 +848,7 @@ export const {
     addProject, 
     addTask, 
     updateTask, 
-    deleteTask 
+    deleteTask,
 } = workspaceSlice.actions;
 
 export default workspaceSlice.reducer;

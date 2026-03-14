@@ -1,9 +1,14 @@
+// FOLLO SLA
+// FOLLO PERF
+// FOLLO REALTIME
 /**
  * Production-grade Express server
  * API v1 with proper security, error handling, and middleware
  */
 
 import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketServer } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -17,13 +22,60 @@ import workspaceRouter from './routes/workspaceRoutes.js';
 import projectRouter from './routes/projectRoutes.js';
 import taskRouter from './routes/taskRoutes.js';
 import webhookRouter from './routes/webhookRoutes.js';
+import mediaRouter from './routes/mediaRoutes.js';
+import taskSlaRouter from './routes/taskSlaRoutes.js';
+import templateRouter from './routes/templateRoutes.js';
+import notificationRouter from './routes/notificationRoutes.js';
 
 // Middleware & Utils
 import { protect } from './middlewares/authMiddleware.js';
 import { errorHandler, notFoundHandler } from './utils/errors.js';
 import { HTTP_STATUS, TIMING } from './utils/constants.js';
+import { responseTimeLogger } from './middlewares/perfMiddleware.js';
 
 const app = express();
+const httpServer = createServer(app);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SOCKET.IO (FOLLO REALTIME)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export const io = new SocketServer(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || [];
+      if (allowed.includes(origin)) return callback(null, true);
+      if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
+        return callback(null, true);
+      }
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  },
+});
+
+io.on('connection', (socket) => {
+  // Project-level rooms — join when user opens a project
+  socket.on('join_project', (projectId) => {
+    if (typeof projectId === 'string' && projectId.length > 0) {
+      socket.join(`project:${projectId}`);
+    }
+  });
+
+  socket.on('leave_project', (projectId) => {
+    if (typeof projectId === 'string' && projectId.length > 0) {
+      socket.leave(`project:${projectId}`);
+    }
+  });
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PERFORMANCE MONITORING (FOLLO PERF)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Log slow requests (over 500ms)
+app.use(responseTimeLogger(500));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SECURITY MIDDLEWARE
@@ -176,6 +228,10 @@ app.use('/api/v1', apiLimiter);
 app.use('/api/v1/workspaces', protect, workspaceRouter);
 app.use('/api/v1/projects', protect, projectRouter);
 app.use('/api/v1/tasks', protect, taskRouter);
+app.use('/api/v1/tasks', protect, taskSlaRouter); // FOLLO SLA routes
+app.use('/api/v1/templates', protect, templateRouter); // FOLLO SLA Phase 7
+app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
+app.use('/api/v1/media', protect, mediaRouter);
 
 // Legacy routes (for backward compatibility - will be deprecated)
 app.use('/api/workspaces', protect, workspaceRouter);
@@ -198,11 +254,12 @@ app.use(errorHandler);
 
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5001;
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.info(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 Server running on port ${PORT}
 📍 API: http://localhost:${PORT}/api/v1
+🔌 Socket.IO ready
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `);
   });

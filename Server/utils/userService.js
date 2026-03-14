@@ -1,3 +1,4 @@
+// FOLLO FIX
 /**
  * Production-grade user service
  * Handles user sync between Clerk and database
@@ -42,7 +43,7 @@ export async function ensureUserExists(userId) {
       },
     });
     
-    console.info(`[UserService] Created user: ${email} (${userId})`);
+    console.info(`[UserService] Created user: ${userId}`);
     return user;
     
   } catch (error) {
@@ -119,12 +120,12 @@ export async function getUserByEmail(email) {
         },
       });
       
-      console.info(`[UserService] Created user from Clerk: ${normalizedEmail}`);
+      console.info(`[UserService] Created user from Clerk: ${clerkUser.id}`);
       return user;
     }
   } catch (error) {
     // If Clerk lookup fails, just return null
-    console.warn(`[UserService] Clerk lookup failed for ${normalizedEmail}:`, error.message);
+    console.warn(`[UserService] Clerk lookup failed for user:`, error.message);
   }
   
   // User doesn't exist anywhere

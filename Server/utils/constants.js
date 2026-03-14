@@ -53,7 +53,7 @@ export const TASK_STATUS = Object.freeze({
   TODO: 'TODO',
   IN_PROGRESS: 'IN_PROGRESS',
   BLOCKED: 'BLOCKED',
-  IN_REVIEW: 'IN_REVIEW',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
   DONE: 'DONE',
 });
 
@@ -120,7 +120,7 @@ export const TIMING = Object.freeze({
   REQUEST_TIMEOUT_MS: 10000,               // 10 seconds
   DB_CONNECTION_TIMEOUT_MS: 5000,          // 5 seconds
   RATE_LIMIT_WINDOW_MS: 15 * 60 * 1000,    // 15 minutes
-  RATE_LIMIT_MAX_REQUESTS: 100,            // Max requests per window
+  RATE_LIMIT_MAX_REQUESTS: 500,            // Max requests per window
   AUTH_RATE_LIMIT_MAX: 10,                 // Max auth attempts per window
 });
 

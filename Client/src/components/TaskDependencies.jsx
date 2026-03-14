@@ -2,20 +2,23 @@
  * TaskDependencies Component
  * Manages task dependencies (predecessors/successors)
  */
+// FOLLO DEPS
+// FOLLO ACCESS
 
 import { useState } from "react";
 import { Link2, Unlink, Plus, Clock, AlertTriangle, CheckCircle } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
 import toast from "react-hot-toast";
-import { addTaskDependencyAsync, removeTaskDependencyAsync } from "../features/workspaceSlice";
+import { addTaskDependencyAsync, removeTaskDependencyAsync } from "../features/taskSlice";
+import useUserRole from "../hooks/useUserRole";
 
 const STATUS_ICONS = {
     TODO: <Clock className="w-3 h-3 text-zinc-400" />,
     IN_PROGRESS: <Clock className="w-3 h-3 text-blue-500 animate-pulse" />,
     COMPLETED: <CheckCircle className="w-3 h-3 text-green-500" />,
     BLOCKED: <AlertTriangle className="w-3 h-3 text-red-500" />,
-    IN_REVIEW: <Clock className="w-3 h-3 text-amber-500" />,
+    PENDING_APPROVAL: <Clock className="w-3 h-3 text-amber-500" />,
 };
 
 const STATUS_COLORS = {
@@ -23,13 +26,16 @@ const STATUS_COLORS = {
     IN_PROGRESS: 'bg-blue-100 dark:bg-blue-900/30',
     COMPLETED: 'bg-green-100 dark:bg-green-900/30',
     BLOCKED: 'bg-red-100 dark:bg-red-900/30',
-    IN_REVIEW: 'bg-amber-100 dark:bg-amber-900/30',
+    PENDING_APPROVAL: 'bg-amber-100 dark:bg-amber-900/30',
 };
 
-export default function TaskDependencies({ task, projectTasks = [], onTaskClick }) {
+export default function TaskDependencies({ task, projectTasks = [], onTaskClick, onDepsChanged }) {
     const dispatch = useDispatch();
     const { getToken } = useAuth();
     const loadingStates = useSelector((state) => state.workspace?.loadingStates || {});
+    // FOLLO ACCESS: Only managers can add/remove dependencies
+    const { isAdmin, isProjectOwner, projectRole } = useUserRole();
+    const isManager = isAdmin || isProjectOwner || projectRole === 'MANAGER';
     
     const [showAddForm, setShowAddForm] = useState(false);
     const [selectedPredecessor, setSelectedPredecessor] = useState('');
@@ -69,6 +75,7 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
             setSelectedPredecessor('');
             setLagDays(0);
             setShowAddForm(false);
+            onDepsChanged?.();
         } catch (error) {
             toast.error(error || 'Failed to add dependency');
         }
@@ -83,6 +90,7 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
             })).unwrap();
             
             toast.success('Dependency removed');
+            onDepsChanged?.();
         } catch (error) {
             toast.error(error || 'Failed to remove dependency');
         }
@@ -97,6 +105,8 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
                         <Link2 className="w-4 h-4" />
                         Blocked By (Predecessors)
                     </h4>
+                    {/* FOLLO ACCESS: Only managers can add dependencies */}
+                    {isManager && (
                     <button
                         onClick={() => setShowAddForm(!showAddForm)}
                         className="text-xs flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
@@ -104,6 +114,7 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
                         <Plus className="w-3 h-3" />
                         Add
                     </button>
+                    )}
                 </div>
 
                 {/* Add Form */}
@@ -183,6 +194,8 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
                                             </span>
                                         )}
                                     </button>
+                                    {/* FOLLO ACCESS: Only managers can remove dependencies */}
+                                    {isManager && (
                                     <button
                                         onClick={() => handleRemoveDependency(dep.id)}
                                         className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-500 hover:text-red-500"
@@ -190,13 +203,14 @@ export default function TaskDependencies({ task, projectTasks = [], onTaskClick 
                                     >
                                         <Unlink className="w-3 h-3" />
                                     </button>
+                                    )}
                                 </div>
                             );
                         })}
                     </div>
                 ) : (
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">
-                        No predecessors - this task can start anytime
+                        {isManager ? 'No predecessors - this task can start anytime' : 'No prerequisites set.'}
                     </p>
                 )}
             </div>

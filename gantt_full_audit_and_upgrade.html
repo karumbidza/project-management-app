@@ -1,0 +1,262 @@
+
+<style>
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.5)}}
+@keyframes spill{0%{width:0;opacity:0}100%{width:var(--sw);opacity:.9}}
+@keyframes breathe{0%,100%{opacity:.6}50%{opacity:1}}
+.shimmer-wrap{position:absolute;inset:0;overflow:hidden;border-radius:inherit}
+.shimmer-line{position:absolute;top:0;left:0;width:40%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 2s ease-in-out infinite}
+.pulse{animation:pulse-dot 1.2s ease-in-out infinite}
+.breathe{animation:breathe 2s ease-in-out infinite}
+.filter-btn{padding:4px 10px;font-size:11px;border:0.5px solid var(--color-border-secondary);border-radius:20px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:all .15s}
+.filter-btn.active{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary)}
+.filter-btn:hover:not(.active){background:var(--color-background-secondary)}
+</style>
+
+<div style="font-family:var(--font-sans);padding:.75rem 0;">
+
+  <!-- Top bar: filters + search + export -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+    <!-- Search -->
+    <input id="gantt-search" type="text" placeholder="Search tasks…" oninput="filterGantt()"
+      style="padding:5px 10px;font-size:12px;border:0.5px solid var(--color-border-secondary);border-radius:6px;background:var(--color-background-secondary);color:var(--color-text-primary);width:160px;outline:none;">
+
+    <!-- Project filter -->
+    <select id="proj-filter" onchange="filterGantt()"
+      style="padding:5px 8px;font-size:12px;border:0.5px solid var(--color-border-secondary);border-radius:6px;background:var(--color-background-secondary);color:var(--color-text-primary);outline:none;">
+      <option value="">All projects</option>
+      <option value="Gokwer">Gokwer</option>
+      <option value="Gweru">Gweru</option>
+      <option value="Chipinge">Chipinge</option>
+    </select>
+
+    <!-- Status chips -->
+    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      <button class="filter-btn active" data-status="all" onclick="setStatus(this)">All</button>
+      <button class="filter-btn" data-status="overdue" onclick="setStatus(this)">Overdue</button>
+      <button class="filter-btn" data-status="blocked" onclick="setStatus(this)">Blocked</button>
+      <button class="filter-btn" data-status="active" onclick="setStatus(this)">Active</button>
+      <button class="filter-btn" data-status="done" onclick="setStatus(this)">Done</button>
+    </div>
+
+    <!-- Spacer -->
+    <div style="flex:1"></div>
+
+    <!-- Scale -->
+    <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--color-text-secondary);">
+      <span>Scale:</span>
+      <button class="filter-btn active" data-scale="day" onclick="setScale(this)">Day</button>
+      <button class="filter-btn" data-scale="week" onclick="setScale(this)">Week</button>
+      <button class="filter-btn" data-scale="month" onclick="setScale(this)">Month</button>
+    </div>
+
+    <!-- Export -->
+    <button onclick="exportChart('png')"
+      style="display:flex;align-items:center;gap:5px;padding:5px 12px;font-size:11px;border:0.5px solid var(--color-border-secondary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8M5 7l3 3 3-3M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
+      PNG
+    </button>
+    <button onclick="exportChart('pdf')"
+      style="display:flex;align-items:center;gap:5px;padding:5px 12px;font-size:11px;border:0.5px solid var(--color-border-secondary);border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;border-color:#2563eb;">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8M5 7l3 3 3-3M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
+      PDF
+    </button>
+  </div>
+
+  <!-- Results summary -->
+  <div id="gantt-summary" style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:8px;">
+    Showing 5 of 5 tasks · 2 overdue · 1 blocked
+  </div>
+
+  <!-- Date header -->
+  <div style="display:grid;grid-template-columns:190px 1fr;margin-bottom:2px;">
+    <div style="font-size:10px;color:var(--color-text-tertiary);padding:0 12px;letter-spacing:.05em;">TASK / ASSIGNEE</div>
+    <div id="date-header" style="display:flex;">
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 8</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 9</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 10</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 11</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-secondary);font-weight:500;">Mar 12</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 13</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 14</div>
+      <div style="flex:1;text-align:center;font-size:10px;color:var(--color-text-tertiary);">Mar 15</div>
+    </div>
+  </div>
+
+  <!-- Gantt body -->
+  <div id="gantt-body" style="display:flex;flex-direction:column;gap:2px;position:relative;">
+
+    <!-- ROW: Overdue -->
+    <div class="gantt-row" data-status="overdue" data-project="Gokwer" data-task="Sadza Prep"
+      style="display:grid;grid-template-columns:190px 1fr;align-items:center;height:46px;border-radius:7px;background:#fff5f5;border:0.5px solid #fecaca;">
+      <div style="padding:0 12px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Sadza Prep</div>
+        <div style="font-size:10px;color:#dc2626;margin-top:1px;">Peter Drury · 2d overdue</div>
+      </div>
+      <div style="position:relative;height:46px;display:flex;align-items:center;">
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:#dc2626;opacity:.35;z-index:4;pointer-events:none;"></div>
+        <div style="position:absolute;left:3px;font-size:10px;color:var(--color-text-tertiary);opacity:.45;pointer-events:none;">Gokwer</div>
+        <!-- Ghost track -->
+        <div style="position:absolute;left:12.5%;width:37.5%;height:10px;background:var(--color-border-tertiary);border-radius:3px;"></div>
+        <!-- Blue progress up to planned end -->
+        <div style="position:absolute;left:12.5%;width:37.5%;height:10px;background:#93c5fd;border-radius:3px 0 0 3px;"></div>
+        <!-- Red spill -->
+        <div style="--sw:44px;position:absolute;left:50%;width:44px;height:10px;background:#dc2626;border-radius:0 3px 3px 0;animation:spill .55s cubic-bezier(.34,1.56,.64,1) forwards;"></div>
+        <div style="position:absolute;left:calc(50% + 48px);font-size:10px;color:#dc2626;font-weight:500;">+2d</div>
+      </div>
+    </div>
+
+    <!-- ROW: Blocked (with amber glow shadow) -->
+    <div class="gantt-row" data-status="blocked" data-project="Gokwer" data-task="Road Markings"
+      style="display:grid;grid-template-columns:190px 1fr;align-items:center;height:46px;border-radius:7px;background:#fffbeb;border:0.5px solid #fde68a;box-shadow:0 0 0 3px rgba(217,119,6,.08);">
+      <div style="padding:0 12px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Road Markings</div>
+        <div style="font-size:10px;color:#d97706;margin-top:1px;">Peter Drury · Blocked</div>
+      </div>
+      <div style="position:relative;height:46px;display:flex;align-items:center;">
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:#2563eb;opacity:.2;z-index:4;pointer-events:none;"></div>
+        <div style="position:absolute;left:3px;font-size:10px;color:var(--color-text-tertiary);opacity:.45;pointer-events:none;">Gokwer</div>
+        <div style="position:absolute;left:25%;width:25%;height:10px;background:var(--color-border-tertiary);border-radius:3px;"></div>
+        <!-- Amber bar with breathe -->
+        <div style="position:absolute;left:25%;width:14%;height:10px;background:#d97706;border-radius:3px;" class="breathe"></div>
+        <!-- Pulse dot -->
+        <div style="position:absolute;left:calc(25% + 14% - 4px);width:8px;height:8px;background:#d97706;border-radius:50%;z-index:2;box-shadow:0 0 0 3px rgba(217,119,6,.25);" class="pulse"></div>
+        <div style="position:absolute;left:calc(25% + 16%);font-size:10px;color:#d97706;background:#fef3c7;padding:1px 6px;border-radius:3px;font-weight:500;">blocked</div>
+      </div>
+    </div>
+
+    <!-- ROW: In progress -->
+    <div class="gantt-row" data-status="active" data-project="Gweru" data-task="Zesa Connection"
+      style="display:grid;grid-template-columns:190px 1fr;align-items:center;height:46px;border-radius:7px;background:var(--color-background-secondary);">
+      <div style="padding:0 12px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Zesa Connection</div>
+        <div style="font-size:10px;color:var(--color-text-tertiary);margin-top:1px;">Peter Drury · 3d left</div>
+      </div>
+      <div style="position:relative;height:46px;display:flex;align-items:center;">
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:#2563eb;opacity:.2;z-index:4;pointer-events:none;"></div>
+        <div style="position:absolute;left:3px;font-size:10px;color:var(--color-text-tertiary);opacity:.45;pointer-events:none;">Gweru</div>
+        <div style="position:absolute;left:25%;width:37.5%;height:10px;background:var(--color-border-tertiary);border-radius:3px;"></div>
+        <div style="position:absolute;left:25%;width:25%;height:10px;background:#2563eb;border-radius:3px;overflow:hidden;">
+          <div class="shimmer-wrap"><div class="shimmer-line"></div></div>
+        </div>
+        <div style="position:absolute;left:calc(25%+25%-4px);width:8px;height:8px;background:#2563eb;border-radius:50%;z-index:2;box-shadow:0 0 0 3px rgba(37,99,235,.2);" class="pulse"></div>
+        <div style="position:absolute;left:51%;font-size:10px;color:var(--color-text-tertiary);">3d left</div>
+      </div>
+    </div>
+
+    <!-- ROW: Done -->
+    <div class="gantt-row" data-status="done" data-project="Chipinge" data-task="Road Markings 2"
+      style="display:grid;grid-template-columns:190px 1fr;align-items:center;height:46px;border-radius:7px;background:var(--color-background-secondary);">
+      <div style="padding:0 12px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Road Markings 2</div>
+        <div style="font-size:10px;color:#16a34a;margin-top:1px;">Peter Drury · Completed</div>
+      </div>
+      <div style="position:relative;height:46px;display:flex;align-items:center;">
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:#2563eb;opacity:.2;z-index:4;pointer-events:none;"></div>
+        <div style="position:absolute;left:3px;font-size:10px;color:var(--color-text-tertiary);opacity:.45;pointer-events:none;">Chipinge</div>
+        <div style="position:absolute;left:12.5%;width:37.5%;height:10px;background:var(--color-border-tertiary);border-radius:3px;"></div>
+        <div style="position:absolute;left:12.5%;width:37.5%;height:10px;background:#16a34a;border-radius:3px;opacity:.9;"></div>
+        <div style="position:absolute;left:51%;font-size:10px;color:#16a34a;font-weight:500;">✓ done</div>
+      </div>
+    </div>
+
+    <!-- ROW: Todo -->
+    <div class="gantt-row" data-status="todo" data-project="Chipinge" data-task="Site Survey"
+      style="display:grid;grid-template-columns:190px 1fr;align-items:center;height:46px;border-radius:7px;background:var(--color-background-secondary);">
+      <div style="padding:0 12px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Site Survey</div>
+        <div style="font-size:10px;color:var(--color-text-tertiary);margin-top:1px;">Peter Drury</div>
+      </div>
+      <div style="position:relative;height:46px;display:flex;align-items:center;">
+        <div style="position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:#2563eb;opacity:.2;z-index:4;pointer-events:none;"></div>
+        <div style="position:absolute;left:3px;font-size:10px;color:var(--color-text-tertiary);opacity:.45;pointer-events:none;">Chipinge</div>
+        <div style="position:absolute;left:62.5%;width:25%;height:10px;background:var(--color-border-tertiary);border-radius:3px;opacity:.5;"></div>
+        <div style="position:absolute;left:62.5%;top:29px;font-size:10px;color:var(--color-text-tertiary);">starts Mar 14</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Today label -->
+  <div style="display:grid;grid-template-columns:190px 1fr;margin-top:4px;">
+    <div></div>
+    <div style="position:relative;height:14px;">
+      <div style="position:absolute;left:calc(50% - 14px);font-size:10px;color:#2563eb;font-weight:500;">TODAY</div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div style="display:flex;gap:16px;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--color-border-tertiary);flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:22px;height:8px;background:var(--color-border-secondary);border-radius:2px;"></div>Scheduled
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:22px;height:8px;background:#2563eb;border-radius:2px;overflow:hidden;position:relative;">
+        <div class="shimmer-wrap"><div class="shimmer-line"></div></div>
+      </div>Active
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:22px;height:8px;background:#16a34a;border-radius:2px;"></div>Done
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:10px;height:8px;background:#93c5fd;border-radius:2px 0 0 2px;"></div>
+      <div style="width:12px;height:8px;background:#dc2626;border-radius:0 2px 2px 0;margin-left:-1px;"></div>Overdue
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:22px;height:8px;background:#d97706;border-radius:2px;" class="breathe"></div>Blocked
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary);">
+      <div style="width:22px;height:8px;background:#3b82f6;border-radius:2px;opacity:.7;"></div>Pending review
+    </div>
+  </div>
+
+  <!-- Export note -->
+  <div id="export-msg" style="display:none;margin-top:8px;font-size:11px;color:var(--color-text-secondary);background:var(--color-background-secondary);padding:6px 10px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);"></div>
+
+</div>
+
+<script>
+let activeStatus = 'all';
+
+function setStatus(btn) {
+  document.querySelectorAll('[data-status].filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  activeStatus = btn.dataset.status;
+  filterGantt();
+}
+
+function setScale(btn) {
+  document.querySelectorAll('[data-scale]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function filterGantt() {
+  const search = document.getElementById('gantt-search').value.toLowerCase();
+  const proj   = document.getElementById('proj-filter').value;
+  const rows   = document.querySelectorAll('.gantt-row');
+  let visible  = 0;
+
+  rows.forEach(row => {
+    const matchStatus  = activeStatus === 'all' || row.dataset.status === activeStatus;
+    const matchProject = !proj || row.dataset.project === proj;
+    const matchSearch  = !search || row.dataset.task.toLowerCase().includes(search) || row.dataset.project.toLowerCase().includes(search);
+    const show = matchStatus && matchProject && matchSearch;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  document.getElementById('gantt-summary').textContent =
+    `Showing ${visible} of ${rows.length} tasks · 2 overdue · 1 blocked`;
+}
+
+function exportChart(type) {
+  const msg = document.getElementById('export-msg');
+  msg.style.display = 'block';
+  if (type === 'png') {
+    msg.textContent = '⬇ PNG export — in the real app this uses html2canvas to capture the Gantt body and triggers a browser download of gantt-[project]-[date].png';
+  } else {
+    msg.textContent = '⬇ PDF export — in the real app this uses jsPDF + html2canvas to render the Gantt as a landscape A4 PDF with project name, date range, and page footer.';
+  }
+  setTimeout(() => { msg.style.display = 'none'; }, 4000);
+}
+</script>

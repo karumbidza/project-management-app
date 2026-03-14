@@ -1,3 +1,4 @@
+// FOLLO FIX
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Plus, Building2, Trash2, Loader2 } from "lucide-react";
 import { useDispatch, useSelector, shallowEqual } from "react-redux";
@@ -31,7 +32,6 @@ function WorkspaceDropdown() {
             await setActive?.({ organization: organizationId });
         } catch (e) {
             // Organization might not exist in Clerk yet (legacy workspace)
-            console.log('Could not set Clerk org:', e);
         }
         dispatch(setCurrentWorkspace(organizationId));
         setIsOpen(false);

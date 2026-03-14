@@ -1,14 +1,15 @@
-import { useState } from 'react'
+// FOLLO GANTT
+// FOLLO WORKFLOW
 import { useSelector } from 'react-redux'
 import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
+import GanttWidget from './GanttWidget'
 import { 
     FolderOpenIcon, 
     CheckSquareIcon, 
     Clock, 
     AlertCircle,
     ChevronRight,
-    GanttChart,
     CalendarIcon
 } from 'lucide-react'
 
@@ -27,9 +28,12 @@ const MemberDashboard = () => {
         pendingTasks: myTasks.filter(t => t.status === 'TODO' || t.status === 'IN_PROGRESS').length,
         completedTasks: myTasks.filter(t => t.status === 'DONE').length,
         overdueTasks: myTasks.filter(t => {
+            if (t.slaStatus === 'BREACHED') return true
             if (!t.dueDate) return false
             return new Date(t.dueDate) < new Date() && t.status !== 'DONE'
         }).length,
+        atRiskTasks: myTasks.filter(t => t.slaStatus === 'AT_RISK').length,
+        blockedTasks: myTasks.filter(t => t.slaStatus === 'BLOCKED').length,
     }
 
     // Get upcoming tasks (due in next 7 days)
@@ -45,7 +49,8 @@ const MemberDashboard = () => {
         .slice(0, 5)
 
     const priorityColors = {
-        HIGH: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+        CRITICAL: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+        HIGH: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
         MEDIUM: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
         LOW: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
     }
@@ -53,7 +58,7 @@ const MemberDashboard = () => {
     const statusColors = {
         TODO: 'bg-gray-100 text-gray-700 dark:bg-zinc-700 dark:text-zinc-300',
         IN_PROGRESS: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-        IN_REVIEW: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+        PENDING_APPROVAL: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
         DONE: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
     }
 
@@ -119,6 +124,18 @@ const MemberDashboard = () => {
                     </div>
                 </div>
             </div>
+
+            {/* SLA Status Summary */}
+            {(stats.atRiskTasks > 0 || stats.blockedTasks > 0 || stats.overdueTasks > 0) && (
+                <div className="flex flex-wrap gap-2 mb-8 -mt-4">
+                    {stats.overdueTasks > 0 && <span className="text-xs px-2.5 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{stats.overdueTasks} breached</span>}
+                    {stats.blockedTasks > 0 && <span className="text-xs px-2.5 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">{stats.blockedTasks} blocked</span>}
+                    {stats.atRiskTasks > 0 && <span className="text-xs px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">{stats.atRiskTasks} at risk</span>}
+                </div>
+            )}
+
+            {/* ══════ TIMELINE (full width, main item) ══════ */}
+            <GanttWidget />
 
             <div className="grid lg:grid-cols-3 gap-8">
                 {/* My Projects */}

@@ -1,3 +1,4 @@
+// FOLLO FIX
 /**
  * Production-grade error handling
  * Centralized error handler - never expose stack traces to client
@@ -116,8 +117,9 @@ export function errorHandler(err, req, res, next) {
   if (process.env.NODE_ENV === 'development') {
     console.error('Error:', logPayload);
   } else {
-    // Production: structured logging (JSON) without stack trace in response
-    console.error(JSON.stringify(logPayload));
+    // Production: structured logging (JSON) without stack trace
+    const { stack, ...safePayload } = logPayload;
+    console.error(JSON.stringify(safePayload));
   }
   
   // Handle known operational errors

@@ -125,11 +125,8 @@ export function parsePagination(query) {
  * @param {import('express').Response} res
  * @param {*} data - Created resource data
  */
-export function sendCreated(res, data) {
-  return sendSuccess(res, { 
-    data, 
-    statusCode: HTTP_STATUS.CREATED 
-  });
+export function sendCreated(res, data, message = null) {
+  return sendSuccess(res, data, message, HTTP_STATUS.CREATED);
 }
 
 /**

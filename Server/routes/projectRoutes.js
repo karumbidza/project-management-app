@@ -15,6 +15,7 @@ import {
   addProjectMember,
   updateProjectMemberRole,
   removeProjectMember,
+  toggleProjectMember,
 } from "../controllers/projectController.js";
 import { 
   validate, 
@@ -81,5 +82,8 @@ router.patch("/:projectId/members/:memberId", updateProjectMemberRole);
 
 // DELETE /api/v1/projects/:projectId/members/:memberId - Remove member
 router.delete("/:projectId/members/:memberId", removeProjectMember);
+
+// PATCH /api/v1/projects/:projectId/members/:memberId/toggle - Enable/disable member
+router.patch("/:projectId/members/:memberId/toggle", toggleProjectMember);
 
 export default router;

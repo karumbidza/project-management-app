@@ -243,3 +243,61 @@ export async function requireTaskEditor(userId, taskId) {
 
   return { task, projectAccess };
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SLA AUTHORIZATION (FOLLO SLA — Phase 8)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/**
+ * Require task assignee — only the person assigned to the task
+ */
+export async function requireTaskAssignee(userId, taskId) {
+  const { task, projectAccess } = await requireTaskAccess(userId, taskId);
+  if (task.assigneeId !== userId) {
+    throw new AuthorizationError('Only the task assignee can perform this action');
+  }
+  return { task, projectAccess };
+}
+
+/**
+ * Require PM or Admin for a task's project
+ * PM = project OWNER, MANAGER, or workspace ADMIN
+ */
+export async function requireTaskPMOrAdmin(userId, taskId) {
+  const { task, projectAccess } = await requireTaskAccess(userId, taskId);
+  const managerRoles = [PROJECT_ROLES.OWNER, PROJECT_ROLES.MANAGER];
+  if (!managerRoles.includes(projectAccess.role)) {
+    throw new AuthorizationError('Only project managers or workspace admins can perform this action');
+  }
+  return { task, projectAccess };
+}
+
+/**
+ * Express middleware: require authenticated user is a workspace member.
+ * Reads workspaceId from req.query or req.body.
+ */
+export function requireWorkspaceMemberMiddleware(req, res, next) {
+  const userId = req.userId;
+  const workspaceId = req.query.workspaceId || req.body?.workspaceId;
+  if (!workspaceId) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'workspaceId is required' } });
+  }
+  requireWorkspaceMember(userId, workspaceId)
+    .then(() => next())
+    .catch(next);
+}
+
+/**
+ * Express middleware: require workspace admin role.
+ * Reads workspaceId from req.query or req.body.
+ */
+export function requireWorkspaceAdminMiddleware(req, res, next) {
+  const userId = req.userId;
+  const workspaceId = req.query.workspaceId || req.body?.workspaceId;
+  if (!workspaceId) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'workspaceId is required' } });
+  }
+  requireWorkspaceAdmin(userId, workspaceId)
+    .then(() => next())
+    .catch(next);
+}
