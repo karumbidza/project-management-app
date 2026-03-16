@@ -904,6 +904,101 @@ const onDailyPriorityRecalc = inngest.createFunction(
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// JOB 12: DAILY UNASSIGNED TASK CHECK
+// Auto-blocks tasks whose plannedStartDate has arrived but have no assignee.
+// Notifies admins/PMs and posts a system comment.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const onDailyUnassignedCheck = inngest.createFunction(
+  { id: 'daily-unassigned-check', name: 'Daily Unassigned Task Check' },
+  { cron: '0 7 * * *' }, // Run at 7 AM daily
+  async ({ step }) => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    // Find TODO tasks with no assignee whose planned start date has arrived
+    const unassignedTasks = await step.run('fetch-unassigned', async () => {
+      return prisma.task.findMany({
+        where: {
+          assigneeId: null,
+          plannedStartDate: { lte: today },
+          status: { in: ['TODO', 'IN_PROGRESS'] },
+          slaStatus: { not: SLA_STATUS.BLOCKED },
+        },
+        include: {
+          project: { select: { id: true, name: true } },
+        },
+      });
+    });
+
+    if (unassignedTasks.length === 0) {
+      console.info('[WORKFLOW] daily-unassigned-check: no unassigned tasks past start date');
+      return { blocked: 0 };
+    }
+
+    let blocked = 0;
+
+    for (const task of unassignedTasks) {
+      await step.run(`block-${task.id}`, async () => {
+        const now = new Date();
+
+        // Set task as BLOCKED with blocker description
+        await prisma.task.update({
+          where: { id: task.id },
+          data: {
+            status: 'BLOCKED',
+            slaStatus: SLA_STATUS.BLOCKED,
+            blockerRaisedAt: now,
+            blockerDescription: 'Task blocked — no assignee',
+            slaClockPausedAt: now,
+          },
+        });
+
+        await logSlaEvent(prisma, {
+          taskId: task.id,
+          type: SLA_EVENT_TYPE.BLOCKER_RAISED,
+          triggeredBy: 'SYSTEM',
+          metadata: { reason: 'unassigned at start date' },
+        });
+
+        await postSystemComment(
+          task.id,
+          '🚧 [System] Task blocked — no assignee assigned by planned start date'
+        );
+
+        // Notify admins and PMs
+        const recipients = await getPMAndAdminEmails(task.project.id);
+        for (const { email, name } of recipients) {
+          await emailService.sendTaskOverdue({
+            to: email,
+            assigneeName: name,
+            taskTitle: `🚧 Unassigned: ${task.title}`,
+            projectName: task.project.name,
+            dueDate: `Planned start date reached — task has no assignee. Please assign someone.`,
+            daysOverdue: 0,
+          }).catch((err) => console.error('[SLA] unassigned notify failed:', err));
+        }
+
+        // In-app notifications
+        const pmIds = await getPMAndAdminUserIds(task.project.id);
+        createBulkNotifications(pmIds, {
+          type: 'BLOCKER_RAISED',
+          title: 'Task unassigned at start date',
+          message: `"${task.title}" in ${task.project.name} has no assignee — auto-blocked`,
+          metadata: { taskId: task.id, projectId: task.project.id, reason: 'unassigned' },
+          url: `/projects/${task.project.id}/tasks/${task.id}`,
+        });
+      });
+
+      blocked++;
+    }
+
+    console.info(`[WORKFLOW] daily-unassigned-check: blocked ${blocked} unassigned tasks`);
+    return { blocked };
+  }
+);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // EXPORT ALL SLA FUNCTIONS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -919,4 +1014,5 @@ export const slaFunctions = [
   onTaskStarted,
   onTaskStartReminder,
   onDailyPriorityRecalc,
+  onDailyUnassignedCheck,
 ];

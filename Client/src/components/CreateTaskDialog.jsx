@@ -102,11 +102,6 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
             return;
         }
 
-        if (!formData.assigneeId) {
-            toast.error("Please assign the task to someone");
-            return;
-        }
-
         setIsSubmitting(true);
         try {
             await dispatch(createTaskAsync({
@@ -114,7 +109,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                 taskData: {
                     title: formData.title,
                     description: formData.description,
-                    assigneeId: formData.assigneeId,
+                    ...(formData.assigneeId && { assigneeId: formData.assigneeId }),
                     plannedStartDate: formData.start_date,
                     plannedEndDate: formData.due_date,
                     due_date: formData.due_date,

@@ -2,8 +2,9 @@
 // FOLLO DASHBOARD
 import { useState, useMemo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { useUser } from '@clerk/clerk-react';
+import useUserRole from '../hooks/useUserRole';
 import {
     BarChart3,
     TrendingUp,
@@ -19,10 +20,11 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isValid, differenceInDays, subWeeks, startOfWeek, endOfWeek, eachWeekOfInterval } from 'date-fns';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList } from 'recharts';
-import useUserRole from '../hooks/useUserRole';
 import toast from 'react-hot-toast';
 import LoadingButton from '../components/ui/LoadingButton';
 import { exportReportPDF } from '../lib/exportReport';
+import ProjectAnalytics from '../components/ProjectAnalytics';
+import SLADashboard from '../components/SLADashboard';
 
 // ─── helpers ──────────────────────────────────────
 const safeDate = (d) => {
@@ -45,6 +47,7 @@ const Reports = () => {
     const projects = currentWorkspace?.projects || [];
     const members = currentWorkspace?.members || [];
 
+    const [activeTab, setActiveTab] = useState('reports');
     const [selectedProject, setSelectedProject] = useState('all');
     const [exporting, setExporting] = useState(false);
     const [taskSearch, setTaskSearch] = useState('');
@@ -193,16 +196,20 @@ const Reports = () => {
 
     // ── Access guard ──────────────────────────────
     if (!canViewReports) {
-        return (
-            <div className="max-w-6xl mx-auto flex flex-col items-center justify-center py-20">
-                <AlertTriangle className="size-12 text-yellow-500 mb-4" />
-                <h2 className="text-xl font-semibold text-zinc-900 dark:text-white mb-2">Access Restricted</h2>
-                <p className="text-zinc-500 dark:text-zinc-400">You don&apos;t have permission to view reports.</p>
-            </div>
-        );
+        return <Navigate to="/tasks" replace />;
     }
 
     const card = 'rounded-lg border bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border-zinc-200 dark:border-zinc-800';
+
+    // Project for Analytics/SLA tabs
+    const activeProject = projects.find(p => p.id === selectedProject);
+    const activeProjectTasks = activeProject?.tasks || [];
+
+    const TABS = [
+        { key: 'reports', label: 'Reports' },
+        { key: 'analytics', label: 'Analytics' },
+        { key: 'sla', label: 'SLA' },
+    ];
 
     // ── status badge ──────────────────────────────
     const SlaBadge = ({ sla }) => {
@@ -245,18 +252,59 @@ const Reports = () => {
                     <p className="text-zinc-500 dark:text-zinc-400 text-sm">Workspace performance insights &middot; {format(new Date(), 'd MMMM yyyy')}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
-                        <option value="all">All Projects</option>
-                        {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <LoadingButton onClick={handleExport} loading={exporting} className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition disabled:opacity-50">
-                        <Download className="size-4" /> Export PDF
-                    </LoadingButton>
+                    {activeTab === 'reports' ? (
+                        <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
+                            <option value="all">All Projects</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    ) : (
+                        <select value={selectedProject === 'all' && projects.length > 0 ? projects[0].id : selectedProject} onChange={e => setSelectedProject(e.target.value)} className="px-3 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100">
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    )}
+                    {activeTab === 'reports' && (
+                        <LoadingButton onClick={handleExport} loading={exporting} className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition disabled:opacity-50">
+                            <Download className="size-4" /> Export PDF
+                        </LoadingButton>
+                    )}
                 </div>
             </div>
 
-            {/* ═══ Printable area ═══ */}
-            <div id="report-content" className="space-y-6">
+            {/* ══════ Tab Navigation ══════ */}
+            <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+                {TABS.map(t => (
+                    <button
+                        key={t.key}
+                        onClick={() => setActiveTab(t.key)}
+                        className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                            activeTab === t.key
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300'
+                        }`}
+                    >
+                        {t.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* ═══ Analytics / SLA tabs ═══ */}
+            {activeTab === 'analytics' && (
+                activeProject ? (
+                    <ProjectAnalytics tasks={activeProjectTasks} project={activeProject} />
+                ) : (
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-16">Select a project to view analytics</p>
+                )
+            )}
+            {activeTab === 'sla' && (
+                activeProject ? (
+                    <SLADashboard tasks={activeProjectTasks} project={activeProject} />
+                ) : (
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-16">Select a project to view SLA dashboard</p>
+                )
+            )}
+
+            {/* ═══ Printable area (Reports tab) ═══ */}
+            {activeTab === 'reports' && <div id="report-content" className="space-y-6">
 
                 {/* ══════ ROW 1 — HEADLINE METRICS ══════ */}
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -473,7 +521,7 @@ const Reports = () => {
                     )}
                 </div>
 
-            </div>
+            </div>}
         </div>
     );
 };

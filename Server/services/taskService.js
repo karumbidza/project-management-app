@@ -147,6 +147,26 @@ export async function getProjectTasks(projectId, userId) {
       new Date(t.plannedStartDate).setHours(0, 0, 0, 0) <= todayMs)
     .map(async (t) => {
       const now = new Date();
+
+      // Unassigned tasks get auto-blocked instead of auto-started
+      if (!t.assigneeId) {
+        if (t.slaStatus !== 'BLOCKED') {
+          await taskRepo.updateTask(t.id, {
+            status: 'BLOCKED',
+            slaStatus: 'BLOCKED',
+            blockerRaisedAt: now,
+            blockerDescription: 'Task blocked — no assignee',
+            slaClockPausedAt: now,
+          });
+          t.status = 'BLOCKED';
+          t.slaStatus = 'BLOCKED';
+          t.blockerDescription = 'Task blocked — no assignee';
+          logSlaEvent(prisma, { taskId: t.id, type: SLA_EVENT_TYPE.BLOCKER_RAISED, triggeredBy: 'system', metadata: { reason: 'unassigned at start date' } })
+            .catch(err => console.error('[SLA] auto-block logSlaEvent failed:', err));
+        }
+        return;
+      }
+
       await taskRepo.updateTask(t.id, {
         status: 'IN_PROGRESS',
         actualStartDate: now,
@@ -201,10 +221,11 @@ export async function createTask(projectId, userId, body) {
     throw new ConflictError(`Maximum ${LIMITS.MAX_TASKS_PER_PROJECT} tasks per project`, ERROR_CODES.LIMIT_EXCEEDED);
   }
 
-  if (!assigneeId) throw new ValidationError('Assignee is required', ERROR_CODES.VALIDATION_ERROR);
-
-  const assigneeUser = await taskRepo.findUserById(assigneeId);
-  if (!assigneeUser) throw new ValidationError(`Assignee user not found: ${assigneeId}`, ERROR_CODES.VALIDATION_ERROR);
+  let assigneeUser = null;
+  if (assigneeId) {
+    assigneeUser = await taskRepo.findUserById(assigneeId);
+    if (!assigneeUser) throw new ValidationError(`Assignee user not found: ${assigneeId}`, ERROR_CODES.VALIDATION_ERROR);
+  }
 
   const creatorUser = await taskRepo.findUserById(userId);
   if (!creatorUser) throw new ValidationError(`Creator user not found: ${userId}`, ERROR_CODES.VALIDATION_ERROR);
@@ -214,14 +235,16 @@ export async function createTask(projectId, userId, body) {
 
   const autoStart = plannedStartDate &&
     new Date(plannedStartDate).setHours(0,0,0,0) <= new Date().setHours(0,0,0,0);
+  // If autostart but no assignee → block instead of starting
+  const autoBlock = autoStart && !assigneeId;
   const now = new Date();
 
   const task = await taskRepo.createTask({
     title,
     description: description || null,
-    priority: priority || 'MEDIUM',
-    // FOLLO AUTOSTART — if plannedStartDate is today or past, auto-start
-    status: autoStart ? 'IN_PROGRESS' : 'TODO',
+    priority: priority || 'LOW',
+    // FOLLO AUTOSTART — if plannedStartDate is today or past, auto-start (or auto-block if unassigned)
+    status: autoBlock ? 'BLOCKED' : autoStart ? 'IN_PROGRESS' : 'TODO',
     type: type || 'TASK',
     dueDate: finalDueDate,
     plannedStartDate: plannedStartDate ? new Date(plannedStartDate) : null,
@@ -230,9 +253,15 @@ export async function createTask(projectId, userId, body) {
     baselineDueDate:      finalDueDate,
     baselinePlannedStart: plannedStartDate ? new Date(plannedStartDate) : null,
     baselinePlannedEnd:   plannedEndDate ? new Date(plannedEndDate) : finalDueDate,
-    ...(autoStart && { actualStartDate: now, slaClockStartedAt: now }),
+    ...(autoStart && !autoBlock && { actualStartDate: now, slaClockStartedAt: now }),
+    ...(autoBlock && {
+      slaStatus: 'BLOCKED',
+      blockerRaisedAt: now,
+      blockerDescription: 'Task blocked — no assignee',
+      slaClockPausedAt: now,
+    }),
     projectId,
-    assigneeId,
+    ...(assigneeId && { assigneeId }),
     createdById: userId,
   });
 
@@ -271,7 +300,7 @@ export async function createTask(projectId, userId, body) {
     createdById: userId,
   });
 
-  if (task.plannedStartDate) {
+  if (task.plannedStartDate && task.assigneeId) {
     inngest.send({
       name: 'task/start-reminder',
       data: {
@@ -285,6 +314,21 @@ export async function createTask(projectId, userId, body) {
         plannedStartDate: task.plannedStartDate.toISOString(),
       },
     }).catch(err => console.error('[Inngest] task/start-reminder send failed:', err));
+  }
+
+  // Auto-blocked at creation — notify admins/PMs
+  if (autoBlock) {
+    inngest.send({
+      name: 'blocker/raised',
+      data: {
+        taskId: task.id,
+        taskTitle: task.title,
+        projectId: task.projectId,
+        projectName: task.project?.name,
+        assigneeName: 'System',
+        description: 'Task blocked — no assignee',
+      },
+    }).catch(err => console.error('[Inngest] auto-block blocker/raised failed:', err));
   }
 
   return task;

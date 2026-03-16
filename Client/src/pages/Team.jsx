@@ -1,18 +1,36 @@
-import { useEffect, useState } from "react";
-import { UsersIcon, Search, UserPlus, Shield, Activity } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { UsersIcon, Search, UserPlus } from "lucide-react";
 import InviteMemberDialog from "../components/InviteMemberDialog";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useUserRole } from "../hooks/useUserRole";
+import { useAuth } from "@clerk/clerk-react";
+import { fetchAllUsersAsync, addWorkspaceMemberAsync } from "../features/workspaceSlice";
+import toast from "react-hot-toast";
+import { Navigate } from "react-router-dom";
 
 const Team = () => {
-    const { canManageMembers } = useUserRole();
+    const { canManageMembers, isAdmin } = useUserRole();
+    const dispatch = useDispatch();
+    const { getToken } = useAuth();
 
-    const [tasks, setTasks] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [users, setUsers] = useState([]);
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);
-    const projects = currentWorkspace?.projects || [];
+    const allUsers = useSelector((state) => state?.workspace?.allUsers || []);
+
+    // Fetch all system users for admin
+    useEffect(() => {
+        if (canManageMembers) {
+            dispatch(fetchAllUsersAsync(getToken));
+        }
+    }, [canManageMembers, dispatch]);
+
+    // Users not in current workspace
+    const otherUsers = useMemo(() => {
+        const memberIds = new Set((currentWorkspace?.members || []).map(m => m.userId || m.user?.id));
+        return allUsers.filter(u => !memberIds.has(u.id));
+    }, [allUsers, currentWorkspace?.members]);
 
     const filteredUsers = users.filter(
         (user) =>
@@ -20,10 +38,35 @@ const Team = () => {
             user?.user?.email?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const filteredOtherUsers = otherUsers.filter(
+        (user) =>
+            user?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            user?.email?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
     useEffect(() => {
         setUsers(currentWorkspace?.members || []);
-        setTasks(currentWorkspace?.projects?.reduce((acc, project) => [...acc, ...project.tasks], []) || []);
     }, [currentWorkspace]);
+
+    // Non-admins cannot access Team page
+    if (!isAdmin) {
+        return <Navigate to="/tasks" replace />;
+    }
+
+    const handleQuickAdd = async (userToAdd) => {
+        if (!currentWorkspace) return;
+        try {
+            await dispatch(addWorkspaceMemberAsync({
+                workspaceId: currentWorkspace.id,
+                email: userToAdd.email,
+                role: "MEMBER",
+                getToken,
+            })).unwrap();
+            toast.success(`${userToAdd.name} added to workspace`);
+        } catch (error) {
+            toast.error(error || "Failed to add member");
+        }
+    };
 
     return (
         <div className="space-y-6 max-w-6xl mx-auto">
@@ -41,50 +84,6 @@ const Team = () => {
                     </button>
                 )}
                 <InviteMemberDialog isDialogOpen={isDialogOpen} setIsDialogOpen={setIsDialogOpen} />
-            </div>
-
-            {/* Stats Cards */}
-            <div className="flex flex-wrap gap-4">
-                {/* Total Members */}
-                <div className="max-sm:w-full dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-gray-300 dark:border-zinc-800 rounded-lg p-6">
-                    <div className="flex items-center justify-between gap-8 md:gap-22">
-                        <div>
-                            <p className="text-sm text-gray-500 dark:text-zinc-400">Total Members</p>
-                            <p className="text-xl font-bold text-gray-900 dark:text-white">{users.length}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-500/10">
-                            <UsersIcon className="size-4 text-blue-500 dark:text-blue-200" />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Active Projects */}
-                <div className="max-sm:w-full dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-gray-300 dark:border-zinc-800 rounded-lg p-6">
-                    <div className="flex items-center justify-between gap-8 md:gap-22">
-                        <div>
-                            <p className="text-sm text-gray-500 dark:text-zinc-400">Active Projects</p>
-                            <p className="text-xl font-bold text-gray-900 dark:text-white">
-                                {projects.filter((p) => p.status !== "CANCELLED" && p.status !== "COMPLETED").length}
-                            </p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-emerald-100 dark:bg-emerald-500/10">
-                            <Activity className="size-4 text-emerald-500 dark:text-emerald-200" />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Total Tasks */}
-                <div className="max-sm:w-full dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-gray-300 dark:border-zinc-800 rounded-lg p-6">
-                    <div className="flex items-center justify-between gap-8 md:gap-22">
-                        <div>
-                            <p className="text-sm text-gray-500 dark:text-zinc-400">Total Tasks</p>
-                            <p className="text-xl font-bold text-gray-900 dark:text-white">{tasks.length}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-purple-100 dark:bg-purple-500/10">
-                            <Shield className="size-4 text-purple-500 dark:text-purple-200" />
-                        </div>
-                    </div>
-                </div>
             </div>
 
             {/* Search */}
@@ -203,6 +202,64 @@ const Team = () => {
                 )}
             </div>
 
+            {/* Other System Users (not in workspace) */}
+            {canManageMembers && filteredOtherUsers.length > 0 && (
+                <div className="w-full">
+                    <h2 className="text-sm font-medium text-gray-500 dark:text-zinc-400 mb-3">
+                        Other Users ({filteredOtherUsers.length})
+                    </h2>
+                    <div className="max-w-4xl w-full">
+                        {/* Desktop */}
+                        <div className="hidden sm:block overflow-x-auto rounded-md border border-dashed border-gray-300 dark:border-zinc-700">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-zinc-800">
+                                <thead className="bg-gray-50/50 dark:bg-zinc-900/30">
+                                    <tr>
+                                        <th className="px-6 py-2.5 text-left font-medium text-sm">Name</th>
+                                        <th className="px-6 py-2.5 text-left font-medium text-sm">Email</th>
+                                        <th className="px-6 py-2.5 text-right font-medium text-sm"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 dark:divide-zinc-800">
+                                    {filteredOtherUsers.map((u) => (
+                                        <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors">
+                                            <td className="px-6 py-2.5 whitespace-nowrap flex items-center gap-3">
+                                                <img src={u.image} alt={u.name} className="size-7 rounded-full bg-gray-200 dark:bg-zinc-800" />
+                                                <span className="text-sm text-zinc-500 dark:text-zinc-400 truncate">{u.name}</span>
+                                            </td>
+                                            <td className="px-6 py-2.5 whitespace-nowrap text-sm text-gray-400 dark:text-zinc-500">{u.email}</td>
+                                            <td className="px-6 py-2.5 whitespace-nowrap text-right">
+                                                <button onClick={() => handleQuickAdd(u)} className="px-3 py-1 text-xs rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition">
+                                                    + Add
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Mobile */}
+                        <div className="sm:hidden space-y-3">
+                            {filteredOtherUsers.map((u) => (
+                                <div key={u.id} className="p-4 border border-dashed border-gray-300 dark:border-zinc-700 rounded-md">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <img src={u.image} alt={u.name} className="size-9 rounded-full bg-gray-200 dark:bg-zinc-800" />
+                                            <div>
+                                                <p className="font-medium text-gray-700 dark:text-zinc-300 text-sm">{u.name}</p>
+                                                <p className="text-xs text-gray-400 dark:text-zinc-500">{u.email}</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => handleQuickAdd(u)} className="px-3 py-1 text-xs rounded bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                                            + Add
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );

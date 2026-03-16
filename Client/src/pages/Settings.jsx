@@ -7,7 +7,8 @@ import { Building2, Trash2, Loader2, Moon, Sun, Plus, ChevronDown, ChevronUp, Pe
 import LoadingButton from "../components/ui/LoadingButton";
 import { deleteWorkspaceAsync } from "../features/workspaceSlice";
 import { toggleTheme } from "../features/themeSlice";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Navigate } from "react-router-dom";
+import useUserRole from "../hooks/useUserRole";
 import toast from "react-hot-toast";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
@@ -230,12 +231,13 @@ function ProjectTemplateForm({ workspaceId, getToken, taskTemplates, existing, o
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export default function Settings() {
+    const { isAdmin } = useUserRole();
     const { currentWorkspace, workspaces, loadingStates } = useSelector((state) => state.workspace);
     const { theme } = useSelector((state) => state.theme);
     const dispatch = useDispatch();
     const navigate = useNavigate();
     const { getToken, userId } = useAuth();
-    
+
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     const [confirmText, setConfirmText] = useState("");
 
@@ -273,6 +275,11 @@ export default function Settings() {
     }, [wsId, getToken]);
 
     useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+    // Non-admins cannot access Settings
+    if (!isAdmin) {
+        return <Navigate to="/tasks" replace />;
+    }
 
     const handleDeleteTaskTemplate = async (id) => {
         if (!window.confirm("Delete this task template?")) return;

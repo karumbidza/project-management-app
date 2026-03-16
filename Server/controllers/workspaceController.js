@@ -34,6 +34,18 @@ export const createWorkspace = asyncHandler(async (req, res) => {
   // Ensure user exists in our database
   await ensureUserExists(userId);
 
+  // Only first-time users (no memberships) or existing admins can create workspaces
+  const memberships = await prisma.workspaceMember.findMany({
+    where: { userId },
+    select: { role: true },
+  });
+  if (memberships.length > 0 && !memberships.some(m => m.role === WORKSPACE_ROLES.ADMIN)) {
+    throw new AuthorizationError(
+      'Only workspace admins can create new workspaces',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
+
   // Check user's workspace limit
   const existingCount = await prisma.workspace.count({
     where: { ownerId: userId },
@@ -93,6 +105,18 @@ export const syncWorkspace = asyncHandler(async (req, res) => {
 
   // Ensure user exists in our database
   await ensureUserExists(userId);
+
+  // Only first-time users (no memberships) or existing admins can create workspaces
+  const memberships = await prisma.workspaceMember.findMany({
+    where: { userId },
+    select: { role: true },
+  });
+  if (memberships.length > 0 && !memberships.some(m => m.role === WORKSPACE_ROLES.ADMIN)) {
+    throw new AuthorizationError(
+      'Only workspace admins can create new workspaces',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
 
   // Check if workspace already exists
   const existing = await prisma.workspace.findUnique({
@@ -309,4 +333,32 @@ export const deleteWorkspace = asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, { id: workspaceId }, 'Workspace deleted successfully');
+});
+
+/**
+ * Get all users in the system (for admin invite dropdown)
+ * GET /api/v1/workspaces/users
+ * Only workspace admins can list users
+ */
+export const getAllUsers = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+
+  // Verify caller is admin in at least one workspace
+  const adminMembership = await prisma.workspaceMember.findFirst({
+    where: { userId, role: WORKSPACE_ROLES.ADMIN },
+  });
+
+  if (!adminMembership) {
+    throw new AuthorizationError(
+      'Only workspace admins can list users',
+      ERROR_CODES.INSUFFICIENT_PERMISSIONS
+    );
+  }
+
+  const users = await prisma.user.findMany({
+    select: userSelect,
+    orderBy: { name: 'asc' },
+  });
+
+  sendSuccess(res, users);
 });

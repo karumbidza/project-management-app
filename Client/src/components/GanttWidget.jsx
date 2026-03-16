@@ -66,14 +66,14 @@ function getWidgetBarState(task) {
     return { isDone, isBlocked, isActive, isPending, isTodo, isOverdue, isAtRisk, daysOverdue, daysUntilDue, hasStarted, autoStarted };
 }
 
-function getWidgetBarColor(state, projectColor) {
+function getWidgetBarColor(state) {
     if (state.isDone)    return '#16a34a';
     if (state.isBlocked) return '#d97706';
-    if (state.isOverdue) return '#dc2626';
+    if (state.isOverdue) return '#93c5fd';
     if (state.isPending) return '#3b82f6';
     if (state.isAtRisk)  return '#f97316';
-    if (state.isActive)  return projectColor || '#2563eb';
-    return projectColor || '#94a3b8';
+    if (state.isActive)  return '#2563eb';
+    return 'transparent';
 }
 
 export default function GanttWidget() {
@@ -340,7 +340,7 @@ export default function GanttWidget() {
 
                         {filteredTasks.map((task) => {
                             const state = getWidgetBarState(task);
-                            const barColor = getWidgetBarColor(state, task.projectColorHex);
+                            const barColor = getWidgetBarColor(state);
 
                             const left = differenceInDays(task.startDate, startDate) * DAY_WIDTH;
                             const duration = differenceInDays(task.endDate, task.startDate) + 1;

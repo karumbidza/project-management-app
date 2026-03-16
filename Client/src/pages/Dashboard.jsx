@@ -87,7 +87,7 @@ const Dashboard = () => {
     const { getToken } = useAuth();
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const { canCreateProjects, isMemberView } = useUserRole();
+    const { canCreateProjects, isMemberView, isAdmin } = useUserRole();
 
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [activePanel, setActivePanel] = useState(null);
@@ -127,20 +127,6 @@ const Dashboard = () => {
     }, [breachedTasks, overdueTasks]);
 
     const allClear = pendingApprovals.length === 0 && blockedTasks.length === 0 && allOverdueCount === 0 && extensionRequests.length === 0;
-
-    // Needs attention feed — sorted by urgency
-    const needsAttention = useMemo(() => {
-        const items = [
-            ...breachedTasks.map(t => ({ ...t, urgency: 1 })),
-            ...overdueTasks.filter(t => t.slaStatus !== 'BREACHED').map(t => ({ ...t, urgency: 1, _overdue: true })),
-            ...blockedTasks.map(t => ({ ...t, urgency: 2 })),
-            ...pendingApprovals.map(t => ({ ...t, urgency: 3 })),
-            ...allTasks.filter(t => t.slaStatus === 'AT_RISK').map(t => ({ ...t, urgency: 4 })),
-            ...extensionRequests.filter(t => t.slaStatus !== 'BREACHED' && t.slaStatus !== 'BLOCKED' && t.slaStatus !== 'PENDING_APPROVAL').map(t => ({ ...t, urgency: 5 })),
-        ];
-        const seen = new Set();
-        return items.filter(t => { if (seen.has(t.id)) return false; seen.add(t.id); return true; }).slice(0, 8);
-    }, [breachedTasks, overdueTasks, blockedTasks, pendingApprovals, allTasks, extensionRequests]);
 
     // ─── Inline actions ────────────────────────────
     const handleApprove = useCallback(async (taskId) => {
@@ -184,43 +170,10 @@ const Dashboard = () => {
         finally { setActionLoading(null); }
     }, [dispatch, getToken, denyReason]);
 
-    // FOLLO ACCESS — Members see My Tasks as their home, not a separate dashboard
-    if (isMemberView) {
+    // FOLLO ACCESS — Non-admins see My Tasks as their home, not admin dashboard
+    if (!isAdmin) {
         return <Navigate to="/tasks" replace />;
     }
-
-    // ─── Status badge helper ───────────────────────
-    const StatusBadge = ({ sla, ext, overdue }) => {
-        if (ext === 'PENDING') return <span className="px-2 py-0.5 text-xs rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">Extension</span>;
-        if (overdue && sla !== 'BREACHED') return <span className="px-2 py-0.5 text-xs rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">OVERDUE</span>;
-        const map = {
-            BREACHED: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
-            BLOCKED: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400',
-            PENDING_APPROVAL: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400',
-            AT_RISK: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
-        };
-        const cls = map[sla] || 'bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400';
-        const label = (sla || 'HEALTHY').replace(/_/g, ' ');
-        return <span className={`px-2 py-0.5 text-xs rounded-full ${cls}`}>{label}</span>;
-    };
-
-    // ─── Time urgency label ────────────────────────
-    const urgencyLabel = (task) => {
-        const due = safeDate(task.dueDate);
-        const submitted = safeDate(task.submittedAt);
-        if (task.slaStatus === 'BREACHED' && due) {
-            const days = differenceInDays(new Date(), due);
-            return `${days}d overdue`;
-        }
-        if (task.slaStatus === 'PENDING_APPROVAL' && submitted) return `submitted ${timeAgo(submitted)}`;
-        if (due) {
-            const days = differenceInDays(due, new Date());
-            if (days < 0) return `${Math.abs(days)}d overdue`;
-            if (days === 0) return 'due today';
-            return `due in ${days}d`;
-        }
-        return '';
-    };
 
     return (
         <div className="max-w-6xl mx-auto space-y-8">
@@ -345,88 +298,7 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* ══════ ROW 3 — NEEDS ATTENTION ══════ */}
-            <div className="bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-                <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                    <h2 className="font-medium text-zinc-900 dark:text-white">Needs Attention</h2>
-                </div>
 
-                {needsAttention.length === 0 ? (
-                    <div className="p-8 text-center">
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400">All tasks on track</p>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {needsAttention.map(task => (
-                            <div key={task.id} className="p-4 flex items-center gap-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition">
-                                <StatusBadge sla={task.slaStatus} ext={task.extensionStatus} overdue={task._overdue} />
-                                <button
-                                    onClick={() => navigate(`/task?taskId=${task.id}&projectId=${task.projectId}`)}
-                                    className="flex-1 min-w-0 text-left"
-                                >
-                                    <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">{task.title}</p>
-                                    <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                                        {task.assignee?.name && (
-                                            <span className="flex items-center gap-1">
-                                                {task.assignee.image ? (
-                                                    <img src={task.assignee.image} className="size-4 rounded-full" alt="" />
-                                                ) : (
-                                                    <span className="size-4 rounded-full bg-zinc-300 dark:bg-zinc-600 flex items-center justify-center text-[9px] font-medium">{task.assignee.name?.[0]}</span>
-                                                )}
-                                                {task.assignee.name}
-                                            </span>
-                                        )}
-                                        <span className="text-zinc-400 dark:text-zinc-600">&middot;</span>
-                                        <span>{urgencyLabel(task)}</span>
-                                    </div>
-                                </button>
-                                {/* Quick action */}
-                                {task.slaStatus === 'PENDING_APPROVAL' && (
-                                    <button
-                                        onClick={() => handleApprove(task.id)}
-                                        disabled={actionLoading === task.id}
-                                        className="px-3 py-1.5 text-xs rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition disabled:opacity-50"
-                                    >
-                                        {actionLoading === task.id ? <Loader2 className="size-3 animate-spin" /> : 'Approve'}
-                                    </button>
-                                )}
-                                {task.slaStatus === 'BLOCKED' && (
-                                    <button
-                                        onClick={() => setActivePanel(PANELS.BLOCKERS)}
-                                        className="px-3 py-1.5 text-xs rounded-md bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition"
-                                    >
-                                        Resolve
-                                    </button>
-                                )}
-                                {task.slaStatus === 'BREACHED' && (
-                                    <button
-                                        onClick={() => navigate(`/task?taskId=${task.id}&projectId=${task.projectId}`)}
-                                        className="px-3 py-1.5 text-xs rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
-                                    >
-                                        View
-                                    </button>
-                                )}
-                                {task._overdue && task.slaStatus !== 'BREACHED' && (
-                                    <button
-                                        onClick={() => navigate(`/task?taskId=${task.id}&projectId=${task.projectId}`)}
-                                        className="px-3 py-1.5 text-xs rounded-md bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 transition"
-                                    >
-                                        View
-                                    </button>
-                                )}
-                                {task.extensionStatus === 'PENDING' && task.slaStatus !== 'PENDING_APPROVAL' && (
-                                    <button
-                                        onClick={() => setActivePanel(PANELS.EXTENSIONS)}
-                                        className="px-3 py-1.5 text-xs rounded-md bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition"
-                                    >
-                                        Review
-                                    </button>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
 
             {/* ══════ SLIDE PANELS ══════ */}
 

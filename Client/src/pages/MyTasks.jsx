@@ -17,6 +17,7 @@ import {
     PlayCircle,
     CheckCircle2,
     ExternalLink,
+    ChevronDown,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useUserRole from '../hooks/useUserRole'
@@ -313,65 +314,64 @@ const MyTasks = () => {
                 </p>
             </div>
 
-            {/* Filters — above Gantt, matches ProjectGantt filter bar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {/* Filters — compact dropdown bar */}
+            <div className="flex items-center gap-3 flex-wrap">
                 {/* Search */}
-                <div style={{ position: 'relative' }}>
-                    <Search style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#a1a1aa' }} />
+                <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                     <input
                         type="text"
                         placeholder="Search tasks…"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        style={{ padding: '5px 10px 5px 28px', fontSize: 12, border: '0.5px solid var(--color-border-secondary, #d4d4d8)', borderRadius: 6, background: 'var(--color-background-secondary, #f4f4f5)', color: 'var(--color-text-primary, #18181b)', width: 180, outline: 'none' }}
+                        className="pl-8 pr-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-44 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition placeholder:text-zinc-400"
                     />
                 </div>
 
-                {/* Status pills */}
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {STATUS_FILTER_PILLS.map(pill => (
-                        <button
-                            key={pill.key}
-                            onClick={() => setStatusFilter(pill.key)}
-                            style={{
-                                padding: '4px 10px', fontSize: 11, borderRadius: 20, cursor: 'pointer',
-                                border: statusFilter === pill.key ? 'none' : '0.5px solid var(--color-border-secondary, #d4d4d8)',
-                                background: statusFilter === pill.key ? 'var(--color-text-primary, #18181b)' : 'var(--color-background-primary, #fff)',
-                                color: statusFilter === pill.key ? 'var(--color-background-primary, #fff)' : 'var(--color-text-secondary, #71717a)',
-                                transition: 'all .15s',
-                            }}
-                        >
-                            {pill.label}
-                        </button>
-                    ))}
+                {/* Status dropdown */}
+                <div className="relative">
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
+                    >
+                        {STATUS_FILTER_PILLS.map(opt => (
+                            <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Status' : opt.label}</option>
+                        ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
                 </div>
 
-                {/* Priority pills */}
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {PRIORITY_FILTER_PILLS.map(pill => (
-                        <button
-                            key={pill.key}
-                            onClick={() => setPriorityFilter(pill.key)}
-                            style={{
-                                padding: '4px 10px', fontSize: 11, borderRadius: 20, cursor: 'pointer',
-                                border: priorityFilter === pill.key ? 'none' : '0.5px solid var(--color-border-secondary, #d4d4d8)',
-                                background: priorityFilter === pill.key ? 'var(--color-text-primary, #18181b)' : 'var(--color-background-primary, #fff)',
-                                color: priorityFilter === pill.key ? 'var(--color-background-primary, #fff)' : 'var(--color-text-secondary, #71717a)',
-                                transition: 'all .15s',
-                            }}
-                        >
-                            {pill.label}
-                        </button>
-                    ))}
+                {/* Priority dropdown */}
+                <div className="relative">
+                    <select
+                        value={priorityFilter}
+                        onChange={(e) => setPriorityFilter(e.target.value)}
+                        className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
+                    >
+                        {PRIORITY_FILTER_PILLS.map(opt => (
+                            <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Priority' : opt.label}</option>
+                        ))}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
                 </div>
 
-                {/* Results summary */}
-                <div style={{ flex: 1 }} />
-                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary, #a1a1aa)' }}>
-                    Showing {sortedTasks.length} of {allTasks.length} tasks
-                    {stats.overdue > 0 && <> · {stats.overdue} overdue</>}
-                    {stats.blocked > 0 && <> · {stats.blocked} blocked</>}
-                </div>
+                {/* Active filter indicators */}
+                {(statusFilter !== 'ALL' || priorityFilter !== 'ALL') && (
+                    <button
+                        onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); }}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                        Clear filters
+                    </button>
+                )}
+
+                <div className="flex-1" />
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                    {sortedTasks.length} of {allTasks.length} tasks
+                    {stats.overdue > 0 && <span className="text-red-500"> · {stats.overdue} overdue</span>}
+                    {stats.blocked > 0 && <span className="text-red-500"> · {stats.blocked} blocked</span>}
+                </p>
             </div>
 
             {/* FOLLO MEMBER-GANTT: Mini Gantt timeline */}
@@ -445,23 +445,6 @@ const MyTasks = () => {
                 )}
             </div>
 
-            {/* Summary Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                    { label: 'TO DO', count: allTasks.filter(t => t.status === 'TODO').length, color: 'text-gray-700 dark:text-zinc-300' },
-                    { label: 'IN PROGRESS', count: allTasks.filter(t => t.status === 'IN_PROGRESS').length, color: 'text-blue-700 dark:text-blue-400' },
-                    { label: 'PENDING', count: allTasks.filter(t => t.status === 'PENDING_APPROVAL').length, color: 'text-purple-700 dark:text-purple-400' },
-                    { label: 'DONE', count: allTasks.filter(t => t.status === 'DONE').length, color: 'text-green-700 dark:text-green-400' },
-                ].map(({ label, count, color }) => (
-                    <div 
-                        key={label}
-                        className="bg-white dark:bg-zinc-800 rounded-lg border border-gray-200 dark:border-zinc-700 p-4"
-                    >
-                        <p className={`text-2xl font-bold ${color}`}>{count}</p>
-                        <p className="text-sm text-gray-500 dark:text-zinc-400">{label.replace('_', ' ')}</p>
-                    </div>
-                ))}
-            </div>
         </div>
     )
 }

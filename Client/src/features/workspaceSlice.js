@@ -67,6 +67,18 @@ export const deleteWorkspaceAsync = createAsyncThunk(
     }
 );
 
+export const fetchAllUsersAsync = createAsyncThunk(
+    'workspace/fetchAllUsers',
+    async (getToken, { rejectWithValue }) => {
+        try {
+            const result = await apiCall(`${API_V1}/workspaces/users`, {}, getToken);
+            return result.data;
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
 export const addWorkspaceMemberAsync = createAsyncThunk(
     'workspace/addWorkspaceMember',
     async ({ workspaceId, email, role, getToken }, { rejectWithValue }) => {
@@ -231,6 +243,7 @@ const initialState = {
     myProjects: [],
     currentProject: null,
     isMemberView: false, // true when user has projects but no workspaces (member-only)
+    allUsers: [], // All system users (for admin invite dropdown)
     loading: false,
     error: null,
     // Granular loading states for better UX
@@ -258,6 +271,7 @@ const workspaceSlice = createSlice({
             state.currentWorkspace = null;
             state.myProjects = [];
             state.currentProject = null;
+            state.allUsers = [];
             state.isMemberView = false;
             state.loading = false;
             state.error = null;
@@ -830,6 +844,11 @@ const workspaceSlice = createSlice({
             })
             .addCase(denyExtensionAsync.rejected, (state, action) => {
                 state.error = action.payload;
+            })
+
+            // ━━━ Fetch All Users (admin only) ━━━
+            .addCase(fetchAllUsersAsync.fulfilled, (state, action) => {
+                state.allUsers = action.payload || [];
             });
     }
 });

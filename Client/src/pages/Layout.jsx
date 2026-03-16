@@ -169,10 +169,9 @@ function Layout() {
         );
     });
     
-    // Member view: not admin in any workspace, but has data to show (projects or workspaces)
-    // A brand-new user with nothing should see admin view so they can create a workspace
-    const hasAnyData = (workspaces?.length > 0 || myProjects?.length > 0);
-    const showMemberView = workspacesLoaded && !isAdminInAnyWorkspace && hasAnyData;
+    // Member view: anyone who is not an admin in any workspace
+    // Non-admins always see member sidebar — they cannot create workspaces
+    const showMemberView = workspacesLoaded && !isAdminInAnyWorkspace;
 
     return (
         <div className="flex bg-white dark:bg-zinc-950 text-gray-900 dark:text-slate-100">

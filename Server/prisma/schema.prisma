@@ -244,7 +244,7 @@ model Task {
     priorityOverride Boolean @default(false)  // FOLLO WORKFLOW — when true, skip auto-calc
     
     // Assignment
-    assigneeId  String
+    assigneeId  String?
     createdById String
     
     // Scheduling - Planned vs Actual
@@ -323,7 +323,7 @@ model Task {
 
     // Relations
     project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-    assignee     User           @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+    assignee     User?          @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
     createdBy    User           @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Cascade)
     comments     Comment[]
     activities   TaskActivity[]

@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth, useOrganizationList } from "@clerk/clerk-react";
 import CreateWorkspaceDialog from "./CreateWorkspaceDialog";
 import toast from "react-hot-toast";
+import useUserRole from "../hooks/useUserRole";
 
 function WorkspaceDropdown() {
 
@@ -23,6 +24,7 @@ function WorkspaceDropdown() {
 
     const dispatch = useDispatch();
     const navigate = useNavigate();
+    const { isAdmin } = useUserRole();
     const { getToken, userId } = useAuth();
     const { setActive } = useOrganizationList();
 
@@ -155,6 +157,7 @@ function WorkspaceDropdown() {
 
                     <hr className="border-gray-200 dark:border-zinc-700" />
 
+                    {isAdmin && (
                     <div 
                         onClick={() => { setShowCreateDialog(true); setIsOpen(false); }}
                         className="p-2 cursor-pointer rounded group hover:bg-gray-100 dark:hover:bg-zinc-800"
@@ -163,6 +166,7 @@ function WorkspaceDropdown() {
                             <Plus className="w-4 h-4" /> Create Workspace
                         </p>
                     </div>
+                    )}
                 </div>
             )}
         </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
-import { ChevronRightIcon, SettingsIcon, KanbanIcon, ChartColumnIcon, CalendarIcon, ArrowRightIcon } from 'lucide-react';
+import { ChevronRightIcon, SettingsIcon, KanbanIcon, CalendarIcon, ArrowRightIcon, GanttChart } from 'lucide-react';
 import { useSelector, shallowEqual } from 'react-redux';
 
 // Stable empty array to prevent selector re-renders
@@ -20,9 +20,9 @@ const ProjectSidebar = () => {
 
     const getProjectSubItems = (projectId) => [
         { title: 'Tasks', icon: KanbanIcon, url: `/projectsDetail?id=${projectId}&tab=tasks` },
-        { title: 'Analytics', icon: ChartColumnIcon, url: `/projectsDetail?id=${projectId}&tab=analytics` },
+        { title: 'Gantt', icon: GanttChart, url: `/projectsDetail?id=${projectId}&tab=gantt` },
         { title: 'Calendar', icon: CalendarIcon, url: `/projectsDetail?id=${projectId}&tab=calendar` },
-        { title: 'Settings', icon: SettingsIcon, url: `/projectsDetail?id=${projectId}&tab=settings` }
+        { title: 'Settings', icon: SettingsIcon, url: `/projectsDetail?id=${projectId}&tab=settings` },
     ];
 
     const toggleProject = (id) => {

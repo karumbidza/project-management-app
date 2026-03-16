@@ -35,9 +35,9 @@ export function useUserRole() {
         );
     });
     
-    // Member view: not admin, but has some data (workspaces or projects)
-    const hasAnyData = (workspaces?.length > 0 || myProjects?.length > 0);
-    const isProjectMemberOnly = isMemberView || (workspacesLoaded && !isAdminInAnyWorkspace && hasAnyData);
+    // Member view: anyone who isn't admin in any workspace
+    // Even users with no workspaces/projects are members if they're not admin
+    const isProjectMemberOnly = isMemberView || (workspacesLoaded && !isAdminInAnyWorkspace);
     
     // FOLLO AUTH-FIX: Match by userId first, fall back to email
     const workspaceMembership = currentWorkspace?.members?.find(

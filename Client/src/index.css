@@ -1,6 +1,29 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
 @import "tailwindcss";
 
+/* ── Design-token CSS variables (light / dark) ── */
+:root {
+    --color-text-primary: #18181b;
+    --color-text-secondary: #52525b;
+    --color-text-tertiary: #a1a1aa;
+    --color-background-primary: #ffffff;
+    --color-background-secondary: #f4f4f5;
+    --color-background-info: #eff6ff;
+    --color-border-secondary: #d4d4d8;
+    --color-border-tertiary: #e4e4e7;
+}
+
+.dark {
+    --color-text-primary: #fafafa;
+    --color-text-secondary: #a1a1aa;
+    --color-text-tertiary: #71717a;
+    --color-background-primary: #09090b;
+    --color-background-secondary: #18181b;
+    --color-background-info: rgba(37, 99, 235, 0.1);
+    --color-border-secondary: #3f3f46;
+    --color-border-tertiary: #27272a;
+}
+
 * {
     font-family: 'Outfit', sans-serif;
 }

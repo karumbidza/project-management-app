@@ -1,19 +1,22 @@
 // FOLLO FIX
-import { useState, useEffect } from "react";
-import { Mail, UserPlus, Building2, FolderOpen, Loader2 } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Mail, UserPlus, Building2, FolderOpen, Loader2, ChevronDown } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth, useOrganization } from "@clerk/clerk-react";
-import { addProjectMemberAsync } from "../features/workspaceSlice";
+import { addProjectMemberAsync, fetchAllUsersAsync } from "../features/workspaceSlice";
 import toast from "react-hot-toast";
 import LoadingButton from "./ui/LoadingButton";
 
 const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
     const dispatch = useDispatch();
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
+    const allUsers = useSelector((state) => state.workspace?.allUsers || []);
     const projects = currentWorkspace?.projects || [];
     const { getToken } = useAuth();
     const { organization } = useOrganization();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const dropdownRef = useRef(null);
     
     // "workspace" = add to workspace (core team), "project" = add to specific project (contractor)
     const [inviteType, setInviteType] = useState("project");
@@ -24,6 +27,35 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
         projectId: "",
         projectRole: "CONTRIBUTOR",
     });
+
+    // Fetch all users when dialog opens
+    useEffect(() => {
+        if (isDialogOpen && getToken) {
+            dispatch(fetchAllUsersAsync(getToken));
+        }
+    }, [isDialogOpen, dispatch, getToken]);
+
+    // Filter users matching the email input (exclude current workspace members)
+    const memberEmails = useMemo(() => {
+        return new Set((currentWorkspace?.members || []).map(m => m.user?.email));
+    }, [currentWorkspace?.members]);
+
+    const suggestions = useMemo(() => {
+        if (!formData.email) return allUsers.filter(u => !memberEmails.has(u.email));
+        const q = formData.email.toLowerCase();
+        return allUsers.filter(u => 
+            !memberEmails.has(u.email) &&
+            (u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
+        );
+    }, [allUsers, formData.email, memberEmails]);
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        if (!showDropdown) return;
+        const h = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setShowDropdown(false); };
+        document.addEventListener('mousedown', h);
+        return () => document.removeEventListener('mousedown', h);
+    }, [showDropdown]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -150,21 +182,41 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Email */}
+                    {/* Email with user suggestions */}
                     <div className="space-y-2">
                         <label htmlFor="email" className="text-sm font-medium text-zinc-900 dark:text-zinc-200">
                             Email Address
                         </label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 w-4 h-4" />
+                        <div className="relative" ref={dropdownRef}>
+                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 dark:text-zinc-400 w-4 h-4 z-10" />
                             <input 
                                 type="email" 
                                 value={formData.email} 
-                                onChange={(e) => setFormData({ ...formData, email: e.target.value })} 
-                                placeholder="Enter email address" 
+                                onChange={(e) => { setFormData({ ...formData, email: e.target.value }); setShowDropdown(true); }}
+                                onFocus={() => setShowDropdown(true)}
+                                placeholder="Search users or type email..." 
                                 className="pl-10 mt-1 w-full rounded border border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-200 text-sm placeholder-zinc-400 dark:placeholder-zinc-500 py-2 focus:outline-none focus:border-blue-500" 
-                                required 
+                                required
+                                autoComplete="off"
                             />
+                            {showDropdown && suggestions.length > 0 && (
+                                <div className="absolute z-50 mt-1 w-full max-h-40 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg">
+                                    {suggestions.slice(0, 6).map((u) => (
+                                        <button
+                                            key={u.id}
+                                            type="button"
+                                            onClick={() => { setFormData({ ...formData, email: u.email }); setShowDropdown(false); }}
+                                            className="flex items-center gap-2.5 w-full px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                        >
+                                            <img src={u.image} alt="" className="size-6 rounded-full bg-zinc-200 dark:bg-zinc-700 shrink-0" />
+                                            <div className="min-w-0">
+                                                <p className="text-sm text-zinc-900 dark:text-zinc-200 truncate">{u.name}</p>
+                                                <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">{u.email}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
 

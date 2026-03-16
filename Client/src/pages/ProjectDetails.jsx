@@ -2,13 +2,14 @@
 // FOLLO FIX
 // FOLLO PERMISSIONS
 // FOLLO REALTIME
+// FOLLO PROJECTS-PAGE
+// FOLLO CLEAN-NAV
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth, useUser } from "@clerk/clerk-react";
-import { ArrowLeftIcon, PlusIcon, SettingsIcon, BarChart3Icon, CalendarIcon, FileStackIcon, ZapIcon, GanttChart, ShieldCheck, FolderDown, LayoutDashboard } from "lucide-react";
-import ProjectOverview from "../components/project/ProjectOverview";
-import ProjectAnalytics from "../components/ProjectAnalytics";
+import { ArrowLeftIcon, PlusIcon, FolderDown } from "lucide-react";
+
 import ProjectSettings from "../components/ProjectSettings";
 import CreateTaskDialog from "../components/CreateTaskDialog";
 import ApplyTemplateDialog from "../components/ApplyTemplateDialog";
@@ -16,15 +17,21 @@ import ProjectCalendar from "../components/ProjectCalendar";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectGantt from "../components/ProjectGantt";
 import useUserRole from "../hooks/useUserRole";
-import SLADashboard from "../components/SLADashboard";
 import { fetchWorkspaces, fetchMyProjects } from "../features/workspaceSlice";
 import { addTaskToProject, updateTaskInProject } from "../features/taskSlice";
 import { io as ioClient } from "socket.io-client";
 
+const TAB_LABELS = {
+    tasks: "Tasks",
+    gantt: "Gantt",
+    calendar: "Calendar",
+    settings: "Settings",
+};
+
 export default function ProjectDetail() {
 
     const [searchParams, setSearchParams] = useSearchParams();
-    const tab = searchParams.get('tab');
+    const tab = searchParams.get('tab') || 'tasks';
     const id = searchParams.get('id');
 
     const navigate = useNavigate();
@@ -33,33 +40,23 @@ export default function ProjectDetail() {
     const { user } = useUser();
     const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject } = useUserRole();
     
-    // Get projects from either workspace (admin) or myProjects (member)
     const workspaceProjects = useSelector((state) => state?.workspace?.currentWorkspace?.projects || []);
     const myProjects = useSelector((state) => state?.workspace?.myProjects || []);
     const projectsLoading = useSelector((state) => state?.workspace?.loadingStates?.myProjects || state?.workspace?.loadingStates?.workspaces);
     
-    // Admin sees all workspace projects; member sees assigned projects
-    // Always merge so a project can be found in either source
-    const projects = useMemo(() => {
-        if (isMemberView) return myProjects;
-        const map = new Map();
-        workspaceProjects.forEach(p => map.set(p.id, p));
-        myProjects.forEach(p => map.set(p.id, p));
-        return [...map.values()];
-    }, [workspaceProjects, myProjects, isMemberView]);
+    const project = useMemo(() => {
+        if (!id) return null;
+        if (isMemberView) return myProjects.find(p => p.id === id) || null;
+        return workspaceProjects.find(p => p.id === id) || myProjects.find(p => p.id === id) || null;
+    }, [id, workspaceProjects, myProjects, isMemberView]);
 
-    const [project, setProject] = useState(null);
-    const [tasks, setTasks] = useState([]);
+    const tasks = useMemo(() => project?.tasks || [], [project]);
+
     const [showCreateTask, setShowCreateTask] = useState(false);
     const [showApplyTemplate, setShowApplyTemplate] = useState(false);
-    const [activeTab, setActiveTab] = useState(tab || "overview");
     const socketRef = useRef(null);
     const userIdRef = useRef(user?.id);
     userIdRef.current = user?.id;
-
-    useEffect(() => {
-        if (tab) setActiveTab(tab);
-    }, [tab]);
 
     // FOLLO REALTIME — Join project socket room for live task updates
     useEffect(() => {
@@ -93,14 +90,6 @@ export default function ProjectDetail() {
         };
     }, [id, dispatch]);
 
-    useEffect(() => {
-        if (projects && projects.length > 0) {
-            const proj = projects.find((p) => p.id === id);
-            setProject(proj);
-            setTasks(proj?.tasks || []);
-        }
-    }, [id, projects]);
-
     const statusColors = {
         PLANNING: "bg-zinc-200 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-200",
         ACTIVE: "bg-emerald-200 text-emerald-900 dark:bg-emerald-500 dark:text-emerald-900",
@@ -110,129 +99,71 @@ export default function ProjectDetail() {
     };
 
     if (!project) {
-        // FOLLO PERF — skeleton while data is still loading
         if (projectsLoading) {
             return (
-                <div className="animate-pulse space-y-3 p-6 max-w-6xl mx-auto">
-                    {[1,2,3,4].map(i => <div key={i} className="h-14 bg-gray-100 dark:bg-zinc-700 rounded-lg" />)}
+                <div className="animate-pulse space-y-4 p-8 max-w-5xl mx-auto">
+                    <div className="h-6 w-48 bg-gray-100 dark:bg-zinc-700 rounded" />
+                    <div className="h-[400px] bg-gray-100 dark:bg-zinc-700 rounded-lg" />
                 </div>
             );
         }
         return (
-            <div className="p-6 text-center text-zinc-900 dark:text-zinc-200">
-                <p className="text-3xl md:text-5xl mt-40 mb-10">Project not found</p>
-                <button onClick={() => navigate(isMemberView ? '/' : '/projects')} className="mt-4 px-4 py-2 rounded bg-zinc-200 text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-white dark:hover:bg-zinc-600" >
-                    {isMemberView ? 'Back to Dashboard' : 'Back to Projects'}
+            <div className="p-8 text-center text-zinc-900 dark:text-zinc-200">
+                <p className="text-2xl mt-32 mb-8">Project not found</p>
+                <button onClick={() => navigate('/projects')} className="px-4 py-2 text-sm rounded bg-zinc-200 text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-white dark:hover:bg-zinc-600" >
+                    Back to Projects
                 </button>
             </div>
         );
     }
 
     return (
-        <div className="space-y-5 max-w-6xl mx-auto text-zinc-900 dark:text-white">
-            {/* Header */}
-            <div className="flex max-md:flex-col gap-4 flex-wrap items-start justify-between max-w-6xl">
-                <div className="flex items-center gap-4">
-                    <button className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400" onClick={() => navigate(isMemberView ? '/' : '/projects')}>
+        <div className="max-w-5xl mx-auto px-6 py-8 text-zinc-900 dark:text-white">
+
+            {/* Minimal header */}
+            <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                    <button className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400" onClick={() => navigate('/projects')}>
                         <ArrowLeftIcon className="w-4 h-4" />
                     </button>
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-xl font-medium">{project.name}</h1>
-                        <span className={`px-2 py-1 rounded text-xs capitalize ${statusColors[project.status]}`} >
-                            {project.status.replace("_", " ")}
-                        </span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {canManageTemplates && (
-                    <button onClick={() => setShowApplyTemplate(true)} className="flex items-center gap-2 px-4 py-2 text-sm rounded border border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40" >
-                        <FolderDown className="size-4" />
-                        From Template
-                    </button>
-                    )}
-                    {canCreateTasks && (
-                    <button onClick={() => setShowCreateTask(true)} className="flex items-center gap-2 px-5 py-2 text-sm rounded bg-gradient-to-br from-blue-500 to-blue-600 text-white" >
-                        <PlusIcon className="size-4" />
-                        New Task
-                    </button>
-                    )}
-                </div>
-            </div>
-
-            {/* Info Cards */}
-            <div className="grid grid-cols-2 sm:flex flex-wrap gap-6">
-                {[
-                    { label: "Total Tasks", value: tasks.length, color: "text-zinc-900 dark:text-white" },
-                    { label: "Completed", value: tasks.filter((t) => t.status === "DONE").length, color: "text-emerald-700 dark:text-emerald-400" },
-                    { label: "In Progress", value: tasks.filter((t) => t.status === "IN_PROGRESS" || t.status === "TODO").length, color: "text-amber-700 dark:text-amber-400" },
-                    { label: "Team Members", value: project.members?.length || 0, color: "text-blue-700 dark:text-blue-400" },
-                ].map((card) => (
-                    <div key={card.label} className=" dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-200 dark:border-zinc-800 flex justify-between sm:min-w-60 p-4 py-2.5 rounded">
-                        <div>
-                            <div className="text-sm text-zinc-600 dark:text-zinc-400">{card.label}</div>
-                            <div className={`text-2xl font-bold ${card.color}`}>{card.value}</div>
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-lg font-medium">{project.name}</h1>
+                            <span className={`px-2 py-0.5 rounded text-[11px] capitalize ${statusColors[project.status]}`}>
+                                {project.status.replace("_", " ")}
+                            </span>
                         </div>
-                        <ZapIcon className={`size-4 ${card.color}`} />
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                            {TAB_LABELS[tab] || 'Overview'}
+                        </p>
                     </div>
-                ))}
+                </div>
+
+                {/* Actions — only on Tasks tab */}
+                {tab === 'tasks' && (
+                    <div className="flex items-center gap-2">
+                        {canManageTemplates && (
+                            <button onClick={() => setShowApplyTemplate(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                                <FolderDown className="size-3.5" />
+                                Template
+                            </button>
+                        )}
+                        {canCreateTasks && (
+                            <button onClick={() => setShowCreateTask(true)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                                <PlusIcon className="size-3.5" />
+                                New Task
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* Tabs */}
+            {/* Content — one section at a time, no tabs */}
             <div>
-                <div className="inline-flex flex-wrap max-sm:grid grid-cols-3 gap-2 border border-zinc-200 dark:border-zinc-800 rounded overflow-hidden">
-                    {[
-                        { key: "overview", label: "Overview", icon: LayoutDashboard },
-                        { key: "tasks", label: "Tasks", icon: FileStackIcon },
-                        { key: "gantt", label: "Gantt", icon: GanttChart },
-                        { key: "calendar", label: "Calendar", icon: CalendarIcon },
-                        { key: "analytics", label: "Analytics", icon: BarChart3Icon },
-                        { key: "sla", label: "SLA", icon: ShieldCheck },
-                        ...(canApproveReject ? [{ key: "settings", label: "Settings", icon: SettingsIcon }] : []),
-                    ].map((tabItem) => (
-                        <button key={tabItem.key} onClick={() => { setActiveTab(tabItem.key); setSearchParams({ id: id, tab: tabItem.key }) }} className={`flex items-center gap-2 px-4 py-2 text-sm transition-all ${activeTab === tabItem.key ? "bg-zinc-100 dark:bg-zinc-800/80" : "hover:bg-zinc-50 dark:hover:bg-zinc-700"}`} >
-                            <tabItem.icon className="size-3.5" />
-                            {tabItem.label}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="mt-6">
-                    {activeTab === "overview" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectOverview project={project} tasks={tasks} />
-                        </div>
-                    )}
-                    {activeTab === "tasks" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectTasks tasks={tasks} projectId={id} />
-                        </div>
-                    )}
-                    {activeTab === "gantt" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectGantt tasks={tasks} project={project} />
-                        </div>
-                    )}
-                    {activeTab === "analytics" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectAnalytics tasks={tasks} project={project} />
-                        </div>
-                    )}
-                    {activeTab === "calendar" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectCalendar tasks={tasks} />
-                        </div>
-                    )}
-                    {activeTab === "sla" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <SLADashboard tasks={tasks} project={project} />
-                        </div>
-                    )}
-                    {activeTab === "settings" && (
-                        <div className=" dark:bg-zinc-900/40 rounded max-w-6xl">
-                            <ProjectSettings project={project} />
-                        </div>
-                    )}
-                </div>
+                {tab === "tasks" && <ProjectTasks tasks={tasks} projectId={id} />}
+                {tab === "gantt" && <ProjectGantt tasks={tasks} project={project} />}
+                {tab === "calendar" && <ProjectCalendar tasks={tasks} />}
+                {tab === "settings" && <ProjectSettings project={project} />}
             </div>
 
             {/* Create Task Modal */}
@@ -244,10 +175,9 @@ export default function ProjectDetail() {
                 onClose={() => setShowApplyTemplate(false)}
                 projectId={id}
                 onApplied={() => {
-                    // Refresh project data to pick up newly created tasks
                     if (isMemberView) {
                         dispatch(fetchMyProjects(getToken));
-                    } else if (currentWorkspace?.id) {
+                    } else {
                         dispatch(fetchWorkspaces(getToken));
                     }
                 }}

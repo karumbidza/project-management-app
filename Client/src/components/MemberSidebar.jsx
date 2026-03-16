@@ -1,6 +1,7 @@
 // FOLLO ACCESS
-import { useEffect, useRef } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+// FOLLO CLEAN-NAV
+import { useState, useEffect, useRef } from 'react'
+import { NavLink, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import { setCurrentProject } from '../features/workspaceSlice'
 import MyTasksSidebar from './MyTasksSidebar'
@@ -8,17 +9,28 @@ import {
     FolderOpenIcon, 
     CheckSquareIcon,
     GanttChart,
-    ChevronDownIcon,
-    UserCircle
+    ChevronRightIcon,
+    UserCircle,
+    KanbanIcon,
+    CalendarIcon
 } from 'lucide-react'
 import { useUser } from '@clerk/clerk-react'
+
+const getProjectSubItems = (projectId) => [
+    { title: 'Tasks', icon: KanbanIcon, tab: 'tasks' },
+    { title: 'Gantt', icon: GanttChart, tab: 'gantt' },
+    { title: 'Calendar', icon: CalendarIcon, tab: 'calendar' },
+];
 
 const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
     const { myProjects, currentProject } = useSelector((state) => state.workspace);
     const dispatch = useDispatch();
     const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
     const { user } = useUser();
     const sidebarRef = useRef(null);
+    const [expandedProjects, setExpandedProjects] = useState(new Set());
 
     // FOLLO ACCESS: My Tasks is the member's primary/home view
     const menuItems = [
@@ -36,9 +48,10 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [setIsSidebarOpen]);
 
-    const handleProjectChange = (projectId) => {
-        dispatch(setCurrentProject(projectId));
-        navigate(`/project?id=${projectId}&tab=tasks`);
+    const toggleProject = (id) => {
+        const newSet = new Set(expandedProjects);
+        newSet.has(id) ? newSet.delete(id) : newSet.add(id);
+        setExpandedProjects(newSet);
     };
 
     return (
@@ -85,7 +98,7 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
 
             <hr className='border-gray-200 dark:border-zinc-800' />
 
-            {/* My Projects Section */}
+            {/* My Projects Section — expandable tree */}
             <div className="flex-1 overflow-y-auto p-4">
                 <div className="mb-3">
                     <h3 className="text-xs font-semibold text-gray-500 dark:text-zinc-400 uppercase tracking-wider px-2">
@@ -95,23 +108,49 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
                 
                 <div className="space-y-1">
                     {myProjects?.map((project) => (
-                        <button
-                            key={project.id}
-                            onClick={() => handleProjectChange(project.id)}
-                            className={`w-full flex items-center gap-3 py-2.5 px-3 rounded-lg transition-all text-left ${
-                                currentProject?.id === project.id 
-                                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800' 
-                                    : 'text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800'
-                            }`}
-                        >
-                            <FolderOpenIcon size={16} className={currentProject?.id === project.id ? 'text-blue-500' : 'text-gray-400'} />
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{project.name}</p>
-                                <p className="text-xs text-gray-500 dark:text-zinc-500 truncate">
-                                    {project.myRole || 'Member'} • {project.tasks?.length || 0} tasks
-                                </p>
-                            </div>
-                        </button>
+                        <div key={project.id}>
+                            <button
+                                onClick={() => toggleProject(project.id)}
+                                className={`w-full flex items-center gap-2 py-2 px-3 rounded-lg transition-colors text-sm text-left ${
+                                    expandedProjects.has(project.id)
+                                        ? 'text-gray-900 dark:text-white'
+                                        : 'text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800'
+                                }`}
+                            >
+                                <ChevronRightIcon className={`size-3 text-gray-400 transition-transform ${expandedProjects.has(project.id) && 'rotate-90'}`} />
+                                <div className="size-2 rounded-full bg-blue-500 shrink-0" />
+                                <span className="truncate">{project.name}</span>
+                            </button>
+
+                            {expandedProjects.has(project.id) && (
+                                <div className="ml-5 mt-1 space-y-0.5">
+                                    {getProjectSubItems(project.id).map((subItem) => {
+                                        const isActive =
+                                            location.pathname === '/project' &&
+                                            searchParams.get('id') === project.id &&
+                                            searchParams.get('tab') === subItem.tab;
+
+                                        return (
+                                            <button
+                                                key={subItem.title}
+                                                onClick={() => {
+                                                    dispatch(setCurrentProject(project.id));
+                                                    navigate(`/project?id=${project.id}&tab=${subItem.tab}`);
+                                                }}
+                                                className={`w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-colors text-xs ${
+                                                    isActive
+                                                        ? 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
+                                                        : 'text-gray-500 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800'
+                                                }`}
+                                            >
+                                                <subItem.icon className="size-3" />
+                                                {subItem.title}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
                     ))}
 
                     {(!myProjects || myProjects.length === 0) && (
@@ -123,31 +162,6 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
                     )}
                 </div>
             </div>
-
-            {/* Current Project Quick Actions */}
-            {currentProject && (
-                <div className="p-4 border-t border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50">
-                    <p className="text-xs text-gray-500 dark:text-zinc-400 mb-2">Current Project</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-3 truncate">
-                        {currentProject.name}
-                    </p>
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={() => navigate(`/project?id=${currentProject.id}&tab=tasks`)}
-                            className="flex-1 text-xs py-2 px-3 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
-                        >
-                            View Tasks
-                        </button>
-                        <button 
-                            onClick={() => navigate(`/project?id=${currentProject.id}&tab=gantt`)}
-                            className="flex-1 text-xs py-2 px-3 bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 rounded hover:bg-gray-300 dark:hover:bg-zinc-600 transition"
-                        >
-                            <GanttChart size={12} className="inline mr-1" />
-                            Gantt
-                        </button>
-                    </div>
-                </div>
-            )}
         </div>
     )
 }
