@@ -1,4 +1,5 @@
 // FOLLO FIX
+// FOLLO SECURITY
 import prisma from "../configs/prisma.js";
 import { clerkClient } from "@clerk/express";
 
@@ -16,14 +17,14 @@ const ensureUserInDb = async (userId) => {
             user = await prisma.user.create({
                 data: { id: userId, name, email, image }
             });
-            console.log(`[Auth] Created new user in database: ${userId}`);
+            console.info(JSON.stringify({ level: 'info', event: 'auth.user.created', userId, timestamp: new Date().toISOString() }));
         } catch (error) {
             // Handle duplicate email - user might exist with different Clerk ID
             if (error.code === 'P2002') {
                 const existingUser = await prisma.user.findUnique({ where: { email } });
                 if (existingUser && existingUser.id !== userId) {
                     // User exists with old Clerk ID - migrate to new ID
-                    console.log(`[Auth] Migrating user ${userId} (duplicate email resolved)`);
+                    console.info(JSON.stringify({ level: 'info', event: 'auth.user.migrating', userId, timestamp: new Date().toISOString() }));
                     
                     // Update all relations to use new user ID
                     await prisma.$transaction([
@@ -67,7 +68,7 @@ const ensureUserInDb = async (userId) => {
                     ]);
                     
                     user = await prisma.user.findUnique({ where: { id: userId } });
-                    console.log(`[Auth] Migration complete for ${userId}`);
+                    console.info(JSON.stringify({ level: 'info', event: 'auth.user.migrated', userId, timestamp: new Date().toISOString() }));
                 } else {
                     user = existingUser;
                 }
@@ -80,6 +81,14 @@ const ensureUserInDb = async (userId) => {
 };
 
 export const protect = async (req, res, next) => {
+    // FOLLO TESTS — bypass Clerk in test environment
+    if (process.env.NODE_ENV === 'test' && req.headers['x-test-user-id']) {
+        const testUserId = req.headers['x-test-user-id'];
+        req.auth = async () => ({ userId: testUserId });
+        req.userId = testUserId;
+        return next();
+    }
+
     try {
         const { userId } = await req.auth();
         if (!userId) {

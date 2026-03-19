@@ -32,7 +32,7 @@ export const taskListSelect = {
   projectId: true,
   completionWeight: true,
   extensionStatus: true,
-  extensionRequestedDate: true,
+  extensionRequestedAt: true,
   isDelayed: true,
   delayDays: true,
   sortOrder: true,

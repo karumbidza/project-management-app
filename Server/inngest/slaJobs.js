@@ -1,6 +1,7 @@
 // FOLLO SLA
 // FOLLO NOTIFY
 // FOLLO WORKFLOW
+// FOLLO PERF-2
 /**
  * Inngest SLA Jobs
  * All background jobs for the SLA system: notifications, warnings, breaches,
@@ -52,15 +53,12 @@ async function getPMAndAdminEmails(projectId) {
   if (!project) return [];
 
   const emails = new Map();
-  // Project owner
   if (project.owner?.email) {
     emails.set(project.owner.email, project.owner.name);
   }
-  // Project managers
   for (const m of project.members) {
     if (m.user?.email) emails.set(m.user.email, m.user.name);
   }
-  // Workspace admins
   for (const m of (project.workspace?.members || [])) {
     if (m.user?.email) emails.set(m.user.email, m.user.name);
   }
@@ -112,48 +110,76 @@ const formatDate = (date) =>
   date
     ? new Date(date).toLocaleDateString('en-US', {
         month: 'short',
-        day: 'numeric',
-        year: 'numeric',
+        day:   'numeric',
+        year:  'numeric',
       })
     : 'N/A';
 
+// FOLLO PERF-2: Shared onFailure factory
+const makeFailureHandler = (functionId) => async ({ error, event }) => {
+  console.error(JSON.stringify({
+    level:    'error',
+    event:    'inngest.job.failed',
+    function: functionId,
+    error:    error.message,
+    eventId:  event?.id,
+    timestamp: new Date().toISOString(),
+  }));
+};
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 1: task/submitted
+// JOB 1: follo/task.submitted
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onTaskSubmitted = inngest.createFunction(
-  { id: 'sla-task-submitted' },
-  { event: 'task/submitted' },
+  {
+    id:        'follo/sla-task-submitted',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-task-submitted'),
+  },
+  { event: 'follo/task.submitted' },
   async ({ event }) => {
     const { taskId, taskTitle, projectName, assigneeName, isLate, projectId } = event.data;
 
     const recipients = await getPMAndAdminEmails(projectId);
 
     const lateFlag = isLate ? ' ⚠️ SUBMITTED LATE — task is past its due date.' : '';
-    const subject = `Task pending your approval: ${taskTitle}`;
 
     for (const { email, name } of recipients) {
       await emailService.sendTaskDueReminder({
-        to: email,
+        to:           email,
         assigneeName: name,
-        taskTitle: `[Approval Needed] ${taskTitle}`,
+        taskTitle:    `[Approval Needed] ${taskTitle}`,
         projectName,
-        dueDate: `Submitted by ${assigneeName}.${lateFlag}`,
-      }).catch((err) => console.error('[SLA] submit email failed:', err));
+        dueDate:      `Submitted by ${assigneeName}.${lateFlag}`,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.submit.email.failed', error: err.message,
+      })));
     }
 
-    console.info(`[SLA] task/submitted: notified ${recipients.length} PMs for "${taskTitle}"`);
+    console.info(JSON.stringify({
+      level:    'info',
+      event:    'sla.task.submitted',
+      taskId,
+      notified: recipients.length,
+    }));
     return { notified: recipients.length };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 2: task/sla.warning.24hr
+// JOB 2: follo/task.sla.warning.24hr
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onSlaWarning24hr = inngest.createFunction(
-  { id: 'sla-warning-24hr' },
-  { event: 'task/sla.warning.24hr' },
+  {
+    id:        'follo/sla-warning-24hr',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-warning-24hr'),
+  },
+  { event: 'follo/task.sla.warning.24hr' },
   async ({ event }) => {
     const { taskId } = event.data;
 
@@ -161,7 +187,7 @@ export const onSlaWarning24hr = inngest.createFunction(
       where: { id: taskId },
       include: {
         assignee: { select: { email: true, name: true } },
-        project: { select: { id: true, name: true } },
+        project:  { select: { id: true, name: true } },
       },
     });
 
@@ -177,54 +203,66 @@ export const onSlaWarning24hr = inngest.createFunction(
     // Update SLA status to AT_RISK
     await prisma.task.update({
       where: { id: taskId },
-      data: { slaStatus: SLA_STATUS.AT_RISK },
+      data:  { slaStatus: SLA_STATUS.AT_RISK },
     });
 
     await logSlaEvent(prisma, {
       taskId,
-      type: SLA_EVENT_TYPE.WARNING_24HR,
+      type:        SLA_EVENT_TYPE.WARNING_24HR,
       triggeredBy: 'SYSTEM',
     });
 
     // Notify assignee
     if (task.assignee?.email) {
       await emailService.sendTaskDueReminder({
-        to: task.assignee.email,
+        to:           task.assignee.email,
         assigneeName: task.assignee.name || 'there',
-        taskTitle: `⚠️ SLA Warning: ${task.title}`,
-        projectName: task.project.name,
-        dueDate: `Due in 24 hours — ${formatDate(task.dueDate)}`,
-      }).catch((err) => console.error('[SLA] 24hr warning email failed:', err));
+        taskTitle:    `⚠️ SLA Warning: ${task.title}`,
+        projectName:  task.project.name,
+        dueDate:      `Due in 24 hours — ${formatDate(task.dueDate)}`,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.warning24h.email.failed', error: err.message,
+      })));
     }
 
     // Notify PMs
     const pms = await getPMAndAdminEmails(task.project.id);
     for (const { email, name } of pms) {
       await emailService.sendTaskDueReminder({
-        to: email,
+        to:           email,
         assigneeName: name,
-        taskTitle: `⚠️ SLA Warning: ${task.title}`,
-        projectName: task.project.name,
-        dueDate: `Due in 24 hours — assigned to ${task.assignee?.name || 'unassigned'}`,
-      }).catch((err) => console.error('[SLA] 24hr PM warning failed:', err));
+        taskTitle:    `⚠️ SLA Warning: ${task.title}`,
+        projectName:  task.project.name,
+        dueDate:      `Due in 24 hours — assigned to ${task.assignee?.name || 'unassigned'}`,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.warning24h.pm.email.failed', error: err.message,
+      })));
     }
 
-    console.info(`[SLA] 24hr warning sent for "${task.title}"`);
+    console.info(JSON.stringify({
+      level:  'info',
+      event:  'sla.warning.24hr.sent',
+      taskId,
+      title:  task.title,
+    }));
 
     // In-app notifications (FOLLO NOTIFY)
     const warnUserIds = [];
     if (task.assignee?.email) {
-      const assigneeUser = await prisma.user.findFirst({ where: { email: task.assignee.email }, select: { id: true } });
+      const assigneeUser = await prisma.user.findFirst({
+        where:  { email: task.assignee.email },
+        select: { id: true },
+      });
       if (assigneeUser) warnUserIds.push(assigneeUser.id);
     }
     const pmIds24 = await getPMAndAdminUserIds(task.project.id);
     warnUserIds.push(...pmIds24);
     createBulkNotifications(warnUserIds, {
-      type: 'SLA_WARNING',
-      title: 'SLA Warning — 24h remaining',
-      message: `"${task.title}" in ${task.project.name} is due in 24 hours`,
+      type:     'SLA_WARNING',
+      title:    'SLA Warning — 24h remaining',
+      message:  `"${task.title}" in ${task.project.name} is due in 24 hours`,
       metadata: { taskId, projectId: task.project.id },
-      url: `/projects/${task.project.id}/tasks/${taskId}`,
+      url:      `/projects/${task.project.id}/tasks/${taskId}`,
     });
 
     return { warned: true };
@@ -232,12 +270,17 @@ export const onSlaWarning24hr = inngest.createFunction(
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 3: task/sla.warning.2hr
+// JOB 3: follo/task.sla.warning.2hr
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onSlaWarning2hr = inngest.createFunction(
-  { id: 'sla-warning-2hr' },
-  { event: 'task/sla.warning.2hr' },
+  {
+    id:        'follo/sla-warning-2hr',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-warning-2hr'),
+  },
+  { event: 'follo/task.sla.warning.2hr' },
   async ({ event }) => {
     const { taskId } = event.data;
 
@@ -245,7 +288,7 @@ export const onSlaWarning2hr = inngest.createFunction(
       where: { id: taskId },
       include: {
         assignee: { select: { email: true, name: true } },
-        project: { select: { id: true, name: true } },
+        project:  { select: { id: true, name: true } },
       },
     });
 
@@ -259,51 +302,63 @@ export const onSlaWarning2hr = inngest.createFunction(
 
     await logSlaEvent(prisma, {
       taskId,
-      type: SLA_EVENT_TYPE.WARNING_2HR,
+      type:        SLA_EVENT_TYPE.WARNING_2HR,
       triggeredBy: 'SYSTEM',
     });
 
     // Notify assignee (urgent)
     if (task.assignee?.email) {
       await emailService.sendTaskOverdue({
-        to: task.assignee.email,
+        to:           task.assignee.email,
         assigneeName: task.assignee.name || 'there',
-        taskTitle: `🔴 URGENT: ${task.title}`,
-        projectName: task.project.name,
-        dueDate: formatDate(task.dueDate),
-        daysOverdue: 0,
-      }).catch((err) => console.error('[SLA] 2hr warning email failed:', err));
+        taskTitle:    `🔴 URGENT: ${task.title}`,
+        projectName:  task.project.name,
+        dueDate:      formatDate(task.dueDate),
+        daysOverdue:  0,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.warning2h.email.failed', error: err.message,
+      })));
     }
 
     // Notify PMs (high urgency)
     const pms = await getPMAndAdminEmails(task.project.id);
     for (const { email, name } of pms) {
       await emailService.sendTaskOverdue({
-        to: email,
+        to:           email,
         assigneeName: name,
-        taskTitle: `🔴 URGENT: ${task.title} due in 2 hours`,
-        projectName: task.project.name,
-        dueDate: formatDate(task.dueDate),
-        daysOverdue: 0,
-      }).catch((err) => console.error('[SLA] 2hr PM warning failed:', err));
+        taskTitle:    `🔴 URGENT: ${task.title} due in 2 hours`,
+        projectName:  task.project.name,
+        dueDate:      formatDate(task.dueDate),
+        daysOverdue:  0,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.warning2h.pm.email.failed', error: err.message,
+      })));
     }
 
-    console.info(`[SLA] 2hr URGENT warning sent for "${task.title}"`);
+    console.info(JSON.stringify({
+      level:  'info',
+      event:  'sla.warning.2hr.sent',
+      taskId,
+      title:  task.title,
+    }));
 
     // In-app notifications (FOLLO NOTIFY)
     const urgentUserIds = [];
     if (task.assignee?.email) {
-      const assigneeUser2 = await prisma.user.findFirst({ where: { email: task.assignee.email }, select: { id: true } });
+      const assigneeUser2 = await prisma.user.findFirst({
+        where:  { email: task.assignee.email },
+        select: { id: true },
+      });
       if (assigneeUser2) urgentUserIds.push(assigneeUser2.id);
     }
     const pmIds2 = await getPMAndAdminUserIds(task.project.id);
     urgentUserIds.push(...pmIds2);
     createBulkNotifications(urgentUserIds, {
-      type: 'SLA_WARNING',
-      title: '🚨 URGENT — 2h until SLA breach',
-      message: `"${task.title}" in ${task.project.name} is due in 2 hours`,
+      type:     'SLA_WARNING',
+      title:    '🚨 URGENT — 2h until SLA breach',
+      message:  `"${task.title}" in ${task.project.name} is due in 2 hours`,
       metadata: { taskId, projectId: task.project.id, urgent: true },
-      url: `/projects/${task.project.id}/tasks/${taskId}`,
+      url:      `/projects/${task.project.id}/tasks/${taskId}`,
     });
 
     return { warned: true };
@@ -311,12 +366,17 @@ export const onSlaWarning2hr = inngest.createFunction(
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 4: task/sla.breach
+// JOB 4: follo/task.sla.breach
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onSlaBreach = inngest.createFunction(
-  { id: 'sla-breach' },
-  { event: 'task/sla.breach' },
+  {
+    id:        'follo/sla-breach',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-breach'),
+  },
+  { event: 'follo/task.sla.breach' },
   async ({ event, step }) => {
     const { taskId } = event.data;
 
@@ -324,7 +384,7 @@ export const onSlaBreach = inngest.createFunction(
       where: { id: taskId },
       include: {
         assignee: { select: { id: true, email: true, name: true } },
-        project: { select: { id: true, name: true } },
+        project:  { select: { id: true, name: true } },
       },
     });
 
@@ -355,8 +415,8 @@ export const onSlaBreach = inngest.createFunction(
     await prisma.task.update({
       where: { id: taskId },
       data: {
-        slaStatus: SLA_STATUS.BREACHED,
-        isDelayed: true,
+        slaStatus:      SLA_STATUS.BREACHED,
+        isDelayed:      true,
         slaBreachCount: { increment: 1 },
       },
     });
@@ -368,7 +428,7 @@ export const onSlaBreach = inngest.createFunction(
 
     await logSlaEvent(prisma, {
       taskId,
-      type: SLA_EVENT_TYPE.BREACHED,
+      type:        SLA_EVENT_TYPE.BREACHED,
       triggeredBy: 'SYSTEM',
     });
 
@@ -377,46 +437,59 @@ export const onSlaBreach = inngest.createFunction(
     // Email: assignee + PM + workspace admin
     if (task.assignee?.email) {
       await emailService.sendTaskOverdue({
-        to: task.assignee.email,
+        to:           task.assignee.email,
         assigneeName: task.assignee.name || 'there',
-        taskTitle: `🔴 SLA BREACHED: ${task.title}`,
-        projectName: task.project.name,
-        dueDate: formatDate(task.dueDate),
-        daysOverdue: 1,
-      }).catch((err) => console.error('[SLA] breach assignee email failed:', err));
+        taskTitle:    `🔴 SLA BREACHED: ${task.title}`,
+        projectName:  task.project.name,
+        dueDate:      formatDate(task.dueDate),
+        daysOverdue:  1,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.breach.assignee.email.failed', error: err.message,
+      })));
     }
 
     const pms = await getPMAndAdminEmails(task.project.id);
     for (const { email, name } of pms) {
       await emailService.sendTaskOverdue({
-        to: email,
+        to:           email,
         assigneeName: name,
-        taskTitle: `🔴 SLA BREACHED: ${task.title}`,
-        projectName: task.project.name,
-        dueDate: formatDate(task.dueDate),
-        daysOverdue: 1,
-      }).catch((err) => console.error('[SLA] breach PM email failed:', err));
+        taskTitle:    `🔴 SLA BREACHED: ${task.title}`,
+        projectName:  task.project.name,
+        dueDate:      formatDate(task.dueDate),
+        daysOverdue:  1,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.breach.pm.email.failed', error: err.message,
+      })));
     }
 
     // Schedule the daily overdue tracker starting tomorrow
     await inngest.send({
-      name: 'task/sla.overdue.daily',
+      name: 'follo/task.sla.overdue.daily',
       data: { taskId },
-      // Inngest will run this immediately; the job itself sleeps 24h between iterations
     });
 
-    console.info(`[SLA] BREACH recorded for "${task.title}"`);
+    console.info(JSON.stringify({
+      level:  'info',
+      event:  'sla.breach.recorded',
+      taskId,
+      title:  task.title,
+    }));
     return { breached: true };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 5: task/sla.overdue.daily
+// JOB 5: follo/task.sla.overdue.daily
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onSlaOverdueDaily = inngest.createFunction(
-  { id: 'sla-overdue-daily' },
-  { event: 'task/sla.overdue.daily' },
+  {
+    id:        'follo/sla-overdue-daily',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '30m' },
+    onFailure: makeFailureHandler('follo/sla-overdue-daily'),
+  },
+  { event: 'follo/task.sla.overdue.daily' },
   async ({ event, step }) => {
     const { taskId } = event.data;
 
@@ -428,7 +501,7 @@ export const onSlaOverdueDaily = inngest.createFunction(
         where: { id: taskId },
         include: {
           assignee: { select: { id: true, email: true, name: true } },
-          project: { select: { id: true, name: true } },
+          project:  { select: { id: true, name: true } },
         },
       });
     });
@@ -449,7 +522,7 @@ export const onSlaOverdueDaily = inngest.createFunction(
     await step.run('update-delay', async () => {
       await prisma.task.update({
         where: { id: taskId },
-        data: { delayDays: days, isDelayed: true },
+        data:  { delayDays: days, isDelayed: true },
       });
     });
 
@@ -465,34 +538,47 @@ export const onSlaOverdueDaily = inngest.createFunction(
       const pms = await getPMAndAdminEmails(task.project.id);
       for (const { email, name } of pms) {
         await emailService.sendTaskOverdue({
-          to: email,
+          to:           email,
           assigneeName: name,
-          taskTitle: `📋 ${task.title} — ${days} day${days !== 1 ? 's' : ''} overdue`,
-          projectName: task.project.name,
-          dueDate: formatDate(task.dueDate),
-          daysOverdue: days,
-        }).catch((err) => console.error('[SLA] daily overdue email failed:', err));
+          taskTitle:    `📋 ${task.title} — ${days} day${days !== 1 ? 's' : ''} overdue`,
+          projectName:  task.project.name,
+          dueDate:      formatDate(task.dueDate),
+          daysOverdue:  days,
+        }).catch((err) => console.error(JSON.stringify({
+          level: 'error', event: 'sla.daily.overdue.email.failed', error: err.message,
+        })));
       }
     });
 
     // Re-schedule for tomorrow (chain)
     await inngest.send({
-      name: 'task/sla.overdue.daily',
+      name: 'follo/task.sla.overdue.daily',
       data: { taskId },
     });
 
-    console.info(`[SLA] daily overdue: "${task.title}" is ${days} days overdue`);
+    console.info(JSON.stringify({
+      level:  'info',
+      event:  'sla.overdue.daily',
+      taskId,
+      title:  task.title,
+      days,
+    }));
     return { days, continued: true };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 6: task/approved (unlock dependencies + completion %)
+// JOB 6: follo/task.approved (unlock dependencies + completion %)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onTaskApproved = inngest.createFunction(
-  { id: 'sla-task-approved' },
-  { event: 'task/approved' },
+  {
+    id:        'follo/sla-task-approved',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '10m' },
+    onFailure: makeFailureHandler('follo/sla-task-approved'),
+  },
+  { event: 'follo/task.approved' },
   async ({ event, step }) => {
     const { taskId, taskTitle, projectId, projectName, assigneeName, onTime } = event.data;
 
@@ -532,17 +618,17 @@ export const onTaskApproved = inngest.createFunction(
           await prisma.task.update({
             where: { id: successor.id },
             data: {
-              status: 'TODO',
-              slaClockStartedAt: now,
-              slaStatus: SLA_STATUS.HEALTHY,
+              status:             'TODO',
+              slaClockStartedAt:  now,
+              slaStatus:          SLA_STATUS.HEALTHY,
             },
           });
 
           await logSlaEvent(prisma, {
-            taskId: successor.id,
-            type: SLA_EVENT_TYPE.CLOCK_STARTED,
+            taskId:      successor.id,
+            type:        SLA_EVENT_TYPE.CLOCK_STARTED,
             triggeredBy: 'SYSTEM',
-            metadata: { unlockedBy: taskId },
+            metadata:    { unlockedBy: taskId },
           });
 
           await postSystemComment(
@@ -553,51 +639,53 @@ export const onTaskApproved = inngest.createFunction(
           // Notify assignee
           if (successor.assignee?.email) {
             await emailService.sendTaskAssigned({
-              to: successor.assignee.email,
+              to:           successor.assignee.email,
               assigneeName: successor.assignee.name || 'there',
-              taskTitle: `✅ You're clear to start: ${successor.title}`,
+              taskTitle:    `✅ You're clear to start: ${successor.title}`,
               projectName,
-              dueDate: formatDate(successor.dueDate),
+              dueDate:      formatDate(successor.dueDate),
               assignerName: 'System',
-              priority: successor.priority,
-            }).catch((err) => console.error('[SLA] unlock notify failed:', err));
+              priority:     successor.priority,
+            }).catch((err) => console.error(JSON.stringify({
+              level: 'error', event: 'sla.unlock.notify.failed', error: err.message,
+            })));
 
             // In-app notification (FOLLO NOTIFY)
             createNotification({
-              userId: successor.assignee.id,
-              type: 'PREDECESSOR_COMPLETE',
-              title: 'Dependencies met',
-              message: `"${successor.title}" is now unlocked — all predecessors complete`,
+              userId:   successor.assignee.id,
+              type:     'PREDECESSOR_COMPLETE',
+              title:    'Dependencies met',
+              message:  `"${successor.title}" is now unlocked — all predecessors complete`,
               metadata: { taskId: successor.id, projectId, unlockedBy: taskId },
-              url: `/projects/${projectId}/tasks/${successor.id}`,
+              url:      `/projects/${projectId}/tasks/${successor.id}`,
             });
           }
 
           // Schedule SLA warnings for newly unlocked task
           if (successor.dueDate) {
-            const due = new Date(successor.dueDate);
+            const due   = new Date(successor.dueDate);
             const warn24 = new Date(due.getTime() - 24 * 60 * 60 * 1000);
-            const warn2 = new Date(due.getTime() - 2 * 60 * 60 * 1000);
+            const warn2  = new Date(due.getTime() - 2  * 60 * 60 * 1000);
 
             if (warn24 > now) {
               await inngest.send({
-                name: 'task/sla.warning.24hr',
+                name: 'follo/task.sla.warning.24hr',
                 data: { taskId: successor.id },
-                ts: warn24.getTime(),
+                ts:   warn24.getTime(),
               });
             }
             if (warn2 > now) {
               await inngest.send({
-                name: 'task/sla.warning.2hr',
+                name: 'follo/task.sla.warning.2hr',
                 data: { taskId: successor.id },
-                ts: warn2.getTime(),
+                ts:   warn2.getTime(),
               });
             }
             // Schedule breach check at dueDate
             await inngest.send({
-              name: 'task/sla.breach',
+              name: 'follo/task.sla.breach',
               data: { taskId: successor.id },
-              ts: due.getTime(),
+              ts:   due.getTime(),
             });
           }
         });
@@ -609,7 +697,7 @@ export const onTaskApproved = inngest.createFunction(
     // 3. Recalculate project completion
     const result = await step.run('recalc-completion', async () => {
       const project = await prisma.project.findUnique({
-        where: { id: projectId },
+        where:  { id: projectId },
         select: { progress: true },
       });
       const oldPct = project?.progress || 0;
@@ -621,8 +709,6 @@ export const onTaskApproved = inngest.createFunction(
     const milestone = milestoneCrossed(result.oldPct, result.newPct);
     if (milestone) {
       await step.run('milestone-comment', async () => {
-        // Post to the first task in the project as a proxy for "project comment"
-        // Since there's no project-level comment, post system comment on this task
         await postSystemComment(
           taskId,
           `📊 [System] Project is now ${milestone}% complete`
@@ -630,16 +716,16 @@ export const onTaskApproved = inngest.createFunction(
 
         // In-app notification to all project members (FOLLO NOTIFY)
         const projMembers = await prisma.projectMember.findMany({
-          where: { projectId, isActive: true },
+          where:  { projectId, isActive: true },
           select: { userId: true },
         });
         const memberIds = projMembers.map(m => m.userId);
         createBulkNotifications(memberIds, {
-          type: 'TASK_UPDATED',
-          title: `Project ${milestone}% complete`,
-          message: `"${projectName}" has reached ${milestone}% completion`,
+          type:     'TASK_UPDATED',
+          title:    `Project ${milestone}% complete`,
+          message:  `"${projectName}" has reached ${milestone}% completion`,
           metadata: { projectId, milestone },
-          url: `/projects/${projectId}`,
+          url:      `/projects/${projectId}`,
         });
       });
     }
@@ -650,28 +736,43 @@ export const onTaskApproved = inngest.createFunction(
         const pms = await getPMAndAdminEmails(projectId);
         for (const { email, name } of pms) {
           await emailService.sendTaskDueReminder({
-            to: email,
+            to:           email,
             assigneeName: name,
-            taskTitle: `🎉 Project Complete: ${projectName}`,
+            taskTitle:    `🎉 Project Complete: ${projectName}`,
             projectName,
-            dueDate: 'All tasks approved — 100% complete!',
-          }).catch((err) => console.error('[SLA] project complete email failed:', err));
+            dueDate:      'All tasks approved — 100% complete!',
+          }).catch((err) => console.error(JSON.stringify({
+            level: 'error', event: 'sla.project.complete.email.failed', error: err.message,
+          })));
         }
       });
     }
 
-    console.info(`[SLA] task/approved: "${taskTitle}" — unlocked ${unlocked} tasks, progress ${result.newPct}%`);
+    console.info(JSON.stringify({
+      level:    'info',
+      event:    'sla.task.approved',
+      taskId,
+      title:    taskTitle,
+      unlocked,
+      progress: result.newPct,
+      milestone,
+    }));
     return { unlocked, progress: result.newPct, milestone };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 7a: blocker/raised
+// JOB 7a: follo/blocker.raised
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onBlockerRaised = inngest.createFunction(
-  { id: 'sla-blocker-raised' },
-  { event: 'blocker/raised' },
+  {
+    id:        'follo/sla-blocker-raised',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-blocker-raised'),
+  },
+  { event: 'follo/blocker.raised' },
   async ({ event }) => {
     const {
       taskId, taskTitle, projectId, projectName,
@@ -682,45 +783,61 @@ export const onBlockerRaised = inngest.createFunction(
     const pms = await getPMAndAdminEmails(projectId);
     for (const { email, name } of pms) {
       await emailService.sendTaskOverdue({
-        to: email,
+        to:           email,
         assigneeName: name,
-        taskTitle: `🚧 Quality Blocker: ${taskTitle}`,
+        taskTitle:    `🚧 Quality Blocker: ${taskTitle}`,
         projectName,
-        dueDate: `Raised by ${assigneeName}. SLA paused.`,
-        daysOverdue: 0,
-      }).catch((err) => console.error('[SLA] blocker notify PM failed:', err));
+        dueDate:      `Raised by ${assigneeName}. SLA paused.`,
+        daysOverdue:  0,
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.blocker.pm.email.failed', error: err.message,
+      })));
     }
 
     // If blockedByTaskId provided, notify that task's assignee
     if (blockedByTaskId) {
       const blockedTask = await prisma.task.findUnique({
-        where: { id: blockedByTaskId },
+        where:   { id: blockedByTaskId },
         include: { assignee: { select: { email: true, name: true } } },
       });
       if (blockedTask?.assignee?.email) {
         await emailService.sendTaskOverdue({
-          to: blockedTask.assignee.email,
+          to:           blockedTask.assignee.email,
           assigneeName: blockedTask.assignee.name || 'there',
-          taskTitle: `⚠️ Your work on "${blockedTask.title}" is blocking "${taskTitle}"`,
+          taskTitle:    `⚠️ Your work on "${blockedTask.title}" is blocking "${taskTitle}"`,
           projectName,
-          dueDate: `A quality issue has been raised by ${assigneeName}.`,
-          daysOverdue: 0,
-        }).catch((err) => console.error('[SLA] blocker cross-notify failed:', err));
+          dueDate:      `A quality issue has been raised by ${assigneeName}.`,
+          daysOverdue:  0,
+        }).catch((err) => console.error(JSON.stringify({
+          level: 'error', event: 'sla.blocker.cross.email.failed', error: err.message,
+        })));
       }
     }
 
-    console.info(`[SLA] blocker/raised: "${taskTitle}" by ${assigneeName}`);
+    console.info(JSON.stringify({
+      level:     'info',
+      event:     'sla.blocker.raised',
+      taskId,
+      title:     taskTitle,
+      assignee:  assigneeName,
+      notified:  pms.length,
+    }));
     return { notified: pms.length };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 7b: blocker/resolved
+// JOB 7b: follo/blocker.resolved
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onBlockerResolved = inngest.createFunction(
-  { id: 'sla-blocker-resolved' },
-  { event: 'blocker/resolved' },
+  {
+    id:        'follo/sla-blocker-resolved',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-blocker-resolved'),
+  },
+  { event: 'follo/blocker.resolved' },
   async ({ event }) => {
     const {
       taskId, taskTitle, projectName,
@@ -730,90 +847,114 @@ export const onBlockerResolved = inngest.createFunction(
 
     if (assigneeEmail) {
       const task = await prisma.task.findUnique({
-        where: { id: taskId },
+        where:  { id: taskId },
         select: { dueDate: true },
       });
 
       await emailService.sendTaskAssigned({
-        to: assigneeEmail,
+        to:           assigneeEmail,
         assigneeName: assigneeName || 'there',
-        taskTitle: `✅ Blocker resolved: ${taskTitle}`,
+        taskTitle:    `✅ Blocker resolved: ${taskTitle}`,
         projectName,
-        dueDate: `Resolution: ${resolution}. Your SLA clock has resumed. Due: ${formatDate(task?.dueDate)}`,
+        dueDate:      `Resolution: ${resolution}. Your SLA clock has resumed. Due: ${formatDate(task?.dueDate)}`,
         assignerName: 'System',
-        priority: 'HIGH',
-      }).catch((err) => console.error('[SLA] blocker resolved notify failed:', err));
+        priority:     'HIGH',
+      }).catch((err) => console.error(JSON.stringify({
+        level: 'error', event: 'sla.blocker.resolved.email.failed', error: err.message,
+      })));
     }
 
-    console.info(`[SLA] blocker/resolved: "${taskTitle}" — ${resolution}`);
+    console.info(JSON.stringify({
+      level:      'info',
+      event:      'sla.blocker.resolved',
+      taskId,
+      title:      taskTitle,
+      resolution,
+    }));
     return { notified: assigneeEmail ? 1 : 0 };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 8: task/started (FOLLO WORKFLOW)
+// JOB 8: follo/task.started (FOLLO WORKFLOW)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onTaskStarted = inngest.createFunction(
-  { id: 'sla-task-started' },
-  { event: 'task/started' },
+  {
+    id:        'follo/sla-task-started',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/sla-task-started'),
+  },
+  { event: 'follo/task.started' },
   async ({ event }) => {
     const { taskId, taskTitle, projectId, projectName, assigneeName, dueDate } = event.data;
 
     // 1. Notify all project members
     const pmIds = await getPMAndAdminUserIds(projectId);
     createBulkNotifications(pmIds, {
-      type: 'TASK_UPDATED',
-      title: 'Task started',
-      message: `${assigneeName || 'Assignee'} started "${taskTitle}" in ${projectName}`,
+      type:     'TASK_UPDATED',
+      title:    'Task started',
+      message:  `${assigneeName || 'Assignee'} started "${taskTitle}" in ${projectName}`,
       metadata: { taskId, projectId },
-      url: `/projects/${projectId}/tasks/${taskId}`,
+      url:      `/projects/${projectId}/tasks/${taskId}`,
     });
 
     // 2. Schedule SLA warnings based on dueDate
     if (dueDate) {
-      const due = new Date(dueDate);
-      const now = new Date();
+      const due   = new Date(dueDate);
+      const now   = new Date();
       const warn24 = new Date(due.getTime() - 24 * 60 * 60 * 1000);
-      const warn2 = new Date(due.getTime() - 2 * 60 * 60 * 1000);
+      const warn2  = new Date(due.getTime() - 2  * 60 * 60 * 1000);
 
       if (warn24 > now) {
         await inngest.send({
-          name: 'task/sla.warning.24hr',
+          name: 'follo/task.sla.warning.24hr',
           data: { taskId },
-          ts: warn24.getTime(),
+          ts:   warn24.getTime(),
         });
       }
       if (warn2 > now) {
         await inngest.send({
-          name: 'task/sla.warning.2hr',
+          name: 'follo/task.sla.warning.2hr',
           data: { taskId },
-          ts: warn2.getTime(),
+          ts:   warn2.getTime(),
         });
       }
       // Schedule breach check at dueDate
       if (due > now) {
         await inngest.send({
-          name: 'task/sla.breach',
+          name: 'follo/task.sla.breach',
           data: { taskId },
-          ts: due.getTime(),
+          ts:   due.getTime(),
         });
       }
     }
 
-    console.info(`[SLA] task/started: "${taskTitle}" by ${assigneeName}`);
+    console.info(JSON.stringify({
+      level:    'info',
+      event:    'sla.task.started',
+      taskId,
+      title:    taskTitle,
+      assignee: assigneeName,
+    }));
     return { started: true };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 9: task/start-reminder (FOLLO REALTIME)
+// JOB 9: follo/task.start.reminder (FOLLO REALTIME)
 // Fires at plannedStartDate to remind assignee to begin work
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const onTaskStartReminder = inngest.createFunction(
-  { id: 'sla-task-start-reminder' },
-  { event: 'task/start-reminder' },
+  {
+    id:        'follo/sla-task-start-reminder',
+    retries:   3,
+    timeouts:  { start: '30s', finish: '48h' }, // can sleep up to 48h
+    onFailure: makeFailureHandler('follo/sla-task-start-reminder'),
+  },
+  { event: 'follo/task.start.reminder' },
   async ({ event, step }) => {
     const {
       taskId, taskTitle, projectId, projectName,
@@ -826,7 +967,7 @@ export const onTaskStartReminder = inngest.createFunction(
     // Re-fetch task to check it hasn't already been started
     const task = await step.run('check-task-status', async () => {
       return prisma.task.findUnique({
-        where: { id: taskId },
+        where:  { id: taskId },
         select: { status: true, actualStartDate: true },
       });
     });
@@ -839,12 +980,12 @@ export const onTaskStartReminder = inngest.createFunction(
     // Send reminder notification
     await step.run('send-notification', async () => {
       createNotification({
-        userId: assigneeId,
-        type: 'TASK_UPDATED',
-        title: 'Time to start your task',
-        message: `"${taskTitle}" in ${projectName} is scheduled to begin today`,
+        userId:   assigneeId,
+        type:     'TASK_UPDATED',
+        title:    'Time to start your task',
+        message:  `"${taskTitle}" in ${projectName} is scheduled to begin today`,
         metadata: { taskId, projectId },
-        url: `/projects/${projectId}/tasks/${taskId}`,
+        url:      `/projects/${projectId}/tasks/${taskId}`,
       });
     });
 
@@ -852,16 +993,24 @@ export const onTaskStartReminder = inngest.createFunction(
     if (assigneeEmail) {
       await step.run('send-email', async () => {
         await emailService.sendTaskDueReminder({
-          to: assigneeEmail,
+          to:           assigneeEmail,
           assigneeName: assigneeName || 'there',
-          taskTitle: `📅 Time to start: ${taskTitle}`,
+          taskTitle:    `📅 Time to start: ${taskTitle}`,
           projectName,
-          dueDate: `Your planned start date is today. Please start this task.`,
-        }).catch((err) => console.error('[SLA] start-reminder email failed:', err));
+          dueDate:      `Your planned start date is today. Please start this task.`,
+        }).catch((err) => console.error(JSON.stringify({
+          level: 'error', event: 'sla.start.reminder.email.failed', error: err.message,
+        })));
       });
     }
 
-    console.info(`[SLA] task/start-reminder: reminded ${assigneeName} to start "${taskTitle}"`);
+    console.info(JSON.stringify({
+      level:    'info',
+      event:    'sla.task.start.reminder.sent',
+      taskId,
+      title:    taskTitle,
+      assignee: assigneeName,
+    }));
     return { reminded: true };
   }
 );
@@ -869,17 +1018,22 @@ export const onTaskStartReminder = inngest.createFunction(
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // JOB 11: DAILY PRIORITY RECALCULATION (FOLLO WORKFLOW)
 // Recalculates auto-priority for all active tasks daily.
-// Catches tasks that became overdue overnight.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const onDailyPriorityRecalc = inngest.createFunction(
-  { id: 'daily-priority-recalc', name: 'Daily Priority Recalculation' },
-  { cron: '0 2 * * *' }, // Run at 2 AM daily
+  {
+    id:        'follo/daily-priority-recalc',
+    name:      'Daily Priority Recalculation',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '30m' },
+    onFailure: makeFailureHandler('follo/daily-priority-recalc'),
+  },
+  { cron: '0 2 * * *' },
   async ({ step }) => {
     const activeTasks = await step.run('fetch-active-tasks', async () => {
       return prisma.task.findMany({
         where: {
-          status: { not: 'DONE' },
+          status:          { not: 'DONE' },
           priorityOverride: false,
         },
         select: { id: true },
@@ -887,7 +1041,6 @@ const onDailyPriorityRecalc = inngest.createFunction(
     });
 
     let updated = 0;
-    // Process in batches of 50 to avoid overwhelming the DB
     const batchSize = 50;
     for (let i = 0; i < activeTasks.length; i += batchSize) {
       const batch = activeTasks.slice(i, i + batchSize);
@@ -898,32 +1051,40 @@ const onDailyPriorityRecalc = inngest.createFunction(
       updated += batch.length;
     }
 
-    console.info(`[WORKFLOW] daily-priority-recalc: updated ${updated} tasks`);
+    console.info(JSON.stringify({
+      level:   'info',
+      event:   'workflow.priority.recalc.complete',
+      updated,
+    }));
     return { tasksProcessed: updated };
   }
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // JOB 12: DAILY UNASSIGNED TASK CHECK
-// Auto-blocks tasks whose plannedStartDate has arrived but have no assignee.
-// Notifies admins/PMs and posts a system comment.
+// Auto-blocks tasks with no assignee at their plannedStartDate.
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const onDailyUnassignedCheck = inngest.createFunction(
-  { id: 'daily-unassigned-check', name: 'Daily Unassigned Task Check' },
-  { cron: '0 7 * * *' }, // Run at 7 AM daily
+  {
+    id:        'follo/daily-unassigned-check',
+    name:      'Daily Unassigned Task Check',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '15m' },
+    onFailure: makeFailureHandler('follo/daily-unassigned-check'),
+  },
+  { cron: '0 7 * * *' },
   async ({ step }) => {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
-    // Find TODO tasks with no assignee whose planned start date has arrived
     const unassignedTasks = await step.run('fetch-unassigned', async () => {
       return prisma.task.findMany({
         where: {
-          assigneeId: null,
+          assigneeId:       null,
           plannedStartDate: { lte: today },
-          status: { in: ['TODO', 'IN_PROGRESS'] },
-          slaStatus: { not: SLA_STATUS.BLOCKED },
+          status:           { in: ['TODO', 'IN_PROGRESS'] },
+          slaStatus:        { not: SLA_STATUS.BLOCKED },
         },
         include: {
           project: { select: { id: true, name: true } },
@@ -932,7 +1093,10 @@ const onDailyUnassignedCheck = inngest.createFunction(
     });
 
     if (unassignedTasks.length === 0) {
-      console.info('[WORKFLOW] daily-unassigned-check: no unassigned tasks past start date');
+      console.info(JSON.stringify({
+        level: 'info',
+        event: 'workflow.unassigned.check.none',
+      }));
       return { blocked: 0 };
     }
 
@@ -942,23 +1106,22 @@ const onDailyUnassignedCheck = inngest.createFunction(
       await step.run(`block-${task.id}`, async () => {
         const now = new Date();
 
-        // Set task as BLOCKED with blocker description
         await prisma.task.update({
           where: { id: task.id },
           data: {
-            status: 'BLOCKED',
-            slaStatus: SLA_STATUS.BLOCKED,
-            blockerRaisedAt: now,
-            blockerDescription: 'Task blocked — no assignee',
-            slaClockPausedAt: now,
+            status:              'BLOCKED',
+            slaStatus:           SLA_STATUS.BLOCKED,
+            blockerRaisedAt:     now,
+            blockerDescription:  'Task blocked — no assignee',
+            slaClockPausedAt:    now,
           },
         });
 
         await logSlaEvent(prisma, {
-          taskId: task.id,
-          type: SLA_EVENT_TYPE.BLOCKER_RAISED,
+          taskId:      task.id,
+          type:        SLA_EVENT_TYPE.BLOCKER_RAISED,
           triggeredBy: 'SYSTEM',
-          metadata: { reason: 'unassigned at start date' },
+          metadata:    { reason: 'unassigned at start date' },
         });
 
         await postSystemComment(
@@ -966,34 +1129,38 @@ const onDailyUnassignedCheck = inngest.createFunction(
           '🚧 [System] Task blocked — no assignee assigned by planned start date'
         );
 
-        // Notify admins and PMs
         const recipients = await getPMAndAdminEmails(task.project.id);
         for (const { email, name } of recipients) {
           await emailService.sendTaskOverdue({
-            to: email,
+            to:           email,
             assigneeName: name,
-            taskTitle: `🚧 Unassigned: ${task.title}`,
-            projectName: task.project.name,
-            dueDate: `Planned start date reached — task has no assignee. Please assign someone.`,
-            daysOverdue: 0,
-          }).catch((err) => console.error('[SLA] unassigned notify failed:', err));
+            taskTitle:    `🚧 Unassigned: ${task.title}`,
+            projectName:  task.project.name,
+            dueDate:      `Planned start date reached — task has no assignee. Please assign someone.`,
+            daysOverdue:  0,
+          }).catch((err) => console.error(JSON.stringify({
+            level: 'error', event: 'workflow.unassigned.email.failed', error: err.message,
+          })));
         }
 
-        // In-app notifications
         const pmIds = await getPMAndAdminUserIds(task.project.id);
         createBulkNotifications(pmIds, {
-          type: 'BLOCKER_RAISED',
-          title: 'Task unassigned at start date',
-          message: `"${task.title}" in ${task.project.name} has no assignee — auto-blocked`,
+          type:     'BLOCKER_RAISED',
+          title:    'Task unassigned at start date',
+          message:  `"${task.title}" in ${task.project.name} has no assignee — auto-blocked`,
           metadata: { taskId: task.id, projectId: task.project.id, reason: 'unassigned' },
-          url: `/projects/${task.project.id}/tasks/${task.id}`,
+          url:      `/projects/${task.project.id}/tasks/${task.id}`,
         });
       });
 
       blocked++;
     }
 
-    console.info(`[WORKFLOW] daily-unassigned-check: blocked ${blocked} unassigned tasks`);
+    console.info(JSON.stringify({
+      level:   'info',
+      event:   'workflow.unassigned.check.complete',
+      blocked,
+    }));
     return { blocked };
   }
 );

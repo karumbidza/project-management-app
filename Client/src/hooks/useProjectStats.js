@@ -1,5 +1,7 @@
 // FOLLO PROJECT-OVERVIEW
+// FOLLO GANTT-FINAL
 import { useMemo } from 'react';
+import { calcCompletionPct } from '../lib/completionCalc';
 
 export function useProjectStats(project, tasks = []) {
   return useMemo(() => {
@@ -22,19 +24,8 @@ export function useProjectStats(project, tasks = []) {
       t.slaStatus === 'PENDING_APPROVAL'
     ).length;
 
-    // Weighted completion if completionWeight exists, else simple count
-    const hasWeights = tasks.some(t => t.completionWeight && t.completionWeight > 1);
-    let completionPct = 0;
-    if (total > 0) {
-      if (hasWeights) {
-        const totalWeight = tasks.reduce((s, t) => s + (t.completionWeight || 1), 0);
-        const doneWeight = tasks.filter(t => t.status === 'DONE')
-          .reduce((s, t) => s + (t.completionWeight || 1), 0);
-        completionPct = totalWeight > 0 ? Math.round((doneWeight / totalWeight) * 100) : 0;
-      } else {
-        completionPct = Math.round((done / total) * 100);
-      }
-    }
+    // Hybrid completion: manual weight > duration > equal (FOLLO GANTT-FINAL)
+    let completionPct = calcCompletionPct(tasks);
     completionPct = Math.min(100, Math.max(0, completionPct));
 
     // Timeline

@@ -2,6 +2,7 @@
 // FOLLO WORKFLOW
 // FOLLO ACCESS
 // FOLLO AUTOSTART
+// FOLLO ASSIGN
 /**
  * Task Service
  * Business logic for tasks, dependencies, comments, and activities.
@@ -30,6 +31,19 @@ import { SLA_EVENT_TYPE, logSlaEvent } from "../lib/sla.js";
 import { io } from "../server.js";
 import prisma from "../configs/prisma.js";
 import { updateTaskPriority, recalculateAfterDependencyChange } from "../lib/priorityCalculator.js";
+
+// FOLLO ASSIGN — auto-add user to project as CONTRIBUTOR if not already a member
+async function ensureProjectMember(projectId, userId) {
+  if (!userId) return;
+  const existing = await prisma.projectMember.findUnique({
+    where: { userId_projectId: { userId, projectId } },
+  });
+  if (!existing) {
+    await prisma.projectMember.create({
+      data: { projectId, userId, role: 'CONTRIBUTOR' },
+    });
+  }
+}
 
 // FOLLO WORKFLOW — valid status transitions (system-controlled)
 const VALID_TRANSITIONS = {
@@ -267,6 +281,11 @@ export async function createTask(projectId, userId, body) {
 
   await taskRepo.createActivity(task.id, userId, ACTIVITY_TYPE.TASK_CREATED, `Created task "${title}"`);
 
+  // FOLLO ASSIGN — auto-add assignee to project if not already a member
+  if (assigneeId) {
+    await ensureProjectMember(projectId, assigneeId);
+  }
+
   // Invalidate caches so refreshes show the new task
   invalidateTaskCaches(projectId, project.workspaceId);
 
@@ -302,7 +321,7 @@ export async function createTask(projectId, userId, body) {
 
   if (task.plannedStartDate && task.assigneeId) {
     inngest.send({
-      name: 'task/start-reminder',
+      name: 'follo/task.start.reminder',
       data: {
         taskId: task.id,
         taskTitle: task.title,
@@ -319,7 +338,7 @@ export async function createTask(projectId, userId, body) {
   // Auto-blocked at creation — notify admins/PMs
   if (autoBlock) {
     inngest.send({
-      name: 'blocker/raised',
+      name: 'follo/blocker.raised',
       data: {
         taskId: task.id,
         taskTitle: task.title,
@@ -413,6 +432,11 @@ export async function updateTask(taskId, userId, body) {
 
   const updatedTask = await taskRepo.updateTask(taskId, updateData);
 
+  // FOLLO ASSIGN — auto-add new assignee to project if not already a member
+  if (assigneeId && assigneeId !== task.assigneeId) {
+    await ensureProjectMember(task.projectId, assigneeId);
+  }
+
   invalidateCache(`task:${taskId}`);
   invalidateTaskCaches(task.projectId, task.project.workspaceId);
 
@@ -429,7 +453,7 @@ export async function updateTask(taskId, userId, body) {
     }).catch(err => console.error('[SLA] logSlaEvent CLOCK_STARTED failed:', err));
 
     inngest.send({
-      name: 'task/started',
+      name: 'follo/task.started',
       data: {
         taskId,
         taskTitle: updatedTask.title,

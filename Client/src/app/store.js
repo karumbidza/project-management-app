@@ -1,5 +1,7 @@
 // FOLLO SRP
+// FOLLO PERF-2
 import { configureStore } from '@reduxjs/toolkit'
+import * as Sentry from '@sentry/react'
 import workspaceReducer from '../features/workspaceSlice'
 import taskReducer from '../features/taskSlice'
 import commentReducer from '../features/commentSlice'
@@ -16,4 +18,6 @@ export const store = configureStore({
         theme: themeReducer,
         notifications: notificationReducer,
     },
+    enhancers: (getDefaultEnhancers) =>
+        getDefaultEnhancers().concat(Sentry.createReduxEnhancer()),
 })

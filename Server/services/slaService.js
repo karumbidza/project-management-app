@@ -35,6 +35,7 @@ import {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function isPMOrAdmin(userId, task) {
+  const wsOwner = task.project.workspace?.ownerId === userId;
   const wsAdmin = task.project.workspace?.members?.some(
     (m) => m.userId === userId && m.role === 'ADMIN'
   );
@@ -42,7 +43,7 @@ function isPMOrAdmin(userId, task) {
     (m) => m.userId === userId && (m.role === 'OWNER' || m.role === 'MANAGER')
   );
   const isProjectOwner = task.project.ownerId === userId;
-  return wsAdmin || projManager || isProjectOwner;
+  return wsOwner || wsAdmin || projManager || isProjectOwner;
 }
 
 function requirePMOrAdmin(userId, task) {
@@ -108,12 +109,16 @@ export async function submitTask(taskId, userId, body) {
   );
 
   await inngest.send({
-    name: 'task/submitted',
+    name: 'follo/task.submitted',
     data: {
       taskId, taskTitle: updated.title, projectId: updated.projectId,
       projectName: updated.project.name, assigneeId: userId, assigneeName,
       isLate: task.dueDate ? now > new Date(task.dueDate) : false,
     },
+  });
+
+  io.to(`project:${task.projectId}`).emit('task_updated', {
+    task: updated, projectId: task.projectId, lastUpdatedById: userId,
   });
 
   return { data: updated, message: 'Task submitted for approval' };
@@ -175,12 +180,16 @@ export async function approveTask(taskId, userId) {
   }
 
   await inngest.send({
-    name: 'task/approved',
+    name: 'follo/task.approved',
     data: {
       taskId, taskTitle: updated.title, projectId: updated.projectId,
       projectName: updated.project.name, assigneeId: task.assigneeId,
       assigneeName: updated.assignee?.name, onTime,
     },
+  });
+
+  io.to(`project:${updated.projectId}`).emit('task_updated', {
+    task: updated, projectId: updated.projectId, lastUpdatedById: userId,
   });
 
   return { data: updated, message: `Task approved — ${timeMsg}` };
@@ -227,13 +236,17 @@ export async function rejectTask(taskId, userId, body) {
   }
 
   await inngest.send({
-    name: 'task/rejected',
+    name: 'follo/task.rejected',
     data: {
       taskId, taskTitle: updated.title, projectId: updated.projectId,
       projectName: updated.project.name, assigneeId: task.assigneeId,
       assigneeName: updated.assignee?.name, assigneeEmail: updated.assignee?.email,
       reason: reason.trim(),
     },
+  });
+
+  io.to(`project:${updated.projectId}`).emit('task_updated', {
+    task: updated, projectId: updated.projectId, lastUpdatedById: userId,
   });
 
   return { data: updated, message: 'Task rejected' };
@@ -294,12 +307,16 @@ export async function raiseBlocker(taskId, userId, body) {
   });
 
   await inngest.send({
-    name: 'blocker/raised',
+    name: 'follo/blocker.raised',
     data: {
       taskId, taskTitle: updated.title, projectId: updated.projectId,
       projectName: updated.project.name, assigneeId: userId, assigneeName,
       description: description.trim(), mediaUrl, blockedByTaskId,
     },
+  });
+
+  io.to(`project:${updated.projectId}`).emit('task_updated', {
+    task: updated, projectId: updated.projectId, lastUpdatedById: userId,
   });
 
   return { data: updated, message: 'Blocker raised — SLA clock paused' };
@@ -367,13 +384,17 @@ export async function resolveBlocker(taskId, userId, body) {
   );
 
   await inngest.send({
-    name: 'blocker/resolved',
+    name: 'follo/blocker.resolved',
     data: {
       taskId, taskTitle: updated.title, projectId: updated.projectId,
       projectName: updated.project.name, assigneeId: task.assigneeId,
       assigneeName: updated.assignee?.name, assigneeEmail: updated.assignee?.email,
       resolution, note: note.trim(),
     },
+  });
+
+  io.to(`project:${updated.projectId}`).emit('task_updated', {
+    task: updated, projectId: updated.projectId, lastUpdatedById: userId,
   });
 
   return { data: updated, message: `Blocker resolved — SLA clock resumed (${resolution})` };
@@ -436,6 +457,10 @@ export async function requestMoreInfo(taskId, userId, body) {
       url: `/projects/${task.projectId}/tasks/${taskId}`,
     });
   }
+
+  io.to(`project:${task.projectId}`).emit('task_updated', {
+    task: { ...task, _commentRefresh: true }, projectId: task.projectId, lastUpdatedById: userId,
+  });
 
   return { data: { asked: true }, message: 'Question posted to task discussion' };
 }

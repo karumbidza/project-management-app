@@ -2,7 +2,12 @@
 // FOLLO GANTT-2
 // FOLLO FIX
 // FOLLO PERMISSIONS
+// FOLLO GANTT-FINAL
+// FOLLO GANTT-DONE
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { StatusBadge, SmartTimeLabel } from './gantt/GanttHelpers';
+import { getTimeOverdueShort, getTimeLeftShort } from '../lib/timeFormat';
+import { calcTaskContribution } from '../lib/completionCalc';
 import { useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
@@ -63,9 +68,29 @@ function getProgressBarColors(state) {
     if (state.isBlocked) return { fill: '#d97706', shimmer: false, breathe: true };
     if (state.isPending) return { fill: '#3b82f6', shimmer: false };
     if (state.isOverdue) return { fill: '#93c5fd', shimmer: false, spillColor: '#dc2626' };
-    if (state.isAtRisk)  return { fill: '#f97316', shimmer: true };
+    // isAtRisk does NOT change bar color — IN_PROGRESS stays blue regardless of days-until-due
     if (state.isActive)  return { fill: '#2563eb', shimmer: true };
     return { fill: 'transparent', shimmer: false };
+}
+
+// FOLLO GANTT-DONE
+function getDoneState(task) {
+  const planned      = task.dueDate ? new Date(task.dueDate) : null;
+  const completedRaw = task.actualEndDate ?? task.updatedAt;
+  const completed    = completedRaw ? new Date(completedRaw) : null;
+
+  if (!planned || !completed) {
+    return { type: 'on-time', daysEarly: 0, daysLate: 0, completedAt: completed };
+  }
+
+  const plannedDay   = new Date(planned);   plannedDay.setHours(0,0,0,0);
+  const completedDay = new Date(completed); completedDay.setHours(0,0,0,0);
+  const diffDays     = Math.round((completedDay - plannedDay) / 86400000);
+
+  if (diffDays <= 0) {
+    return { type: diffDays < -1 ? 'early' : 'on-time', daysEarly: Math.abs(diffDays), daysLate: 0, completedAt: completed };
+  }
+  return { type: 'late', daysEarly: 0, daysLate: diffDays, completedAt: completed };
 }
 
 // ─── LEGACY CONSTANTS (kept for reference / selected panel) ─
@@ -94,10 +119,10 @@ const PRIORITY_INDICATORS = {
     LOW: "bg-zinc-500",
 };
 
-const ROW_HEIGHT = 46;
-const HEADER_HEIGHT = 40;
-const LEFT_COL = 190;
-const BAR_H = 20;
+const ROW_HEIGHT = 54;   // FOLLO GANTT-DONE: matched to GanttWidget (was 46)
+const HEADER_H = 44;     // FOLLO GANTT-DONE: matched to GanttWidget (was HEADER_HEIGHT = 40)
+const LEFT_COL = 160;    // FOLLO GANTT-DONE: matched to GanttWidget (was 200)
+const BAR_H = 14;
 const MAX_SPILL_COLS = 5;
 
 // FOLLO GANTT-2 — Scale definitions (Phase 8)
@@ -515,21 +540,34 @@ export default function ProjectGantt({ tasks, project }) {
                 </div>
 
                 {/* Export buttons */}
+                {/* PNG button — FOLLO GANTT-DONE: transparent bg matching GanttWidget */}
                 <button
                     onClick={exportPNG}
                     disabled={exporting}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', fontSize: 11, border: '0.5px solid var(--color-border-secondary, #d4d4d8)', borderRadius: 6, background: 'var(--color-background-primary, #fff)', color: 'var(--color-text-secondary, #71717a)', cursor: 'pointer', opacity: exporting ? 0.5 : 1 }}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                        border: '0.5px solid var(--color-border-secondary, #d4d4d8)',
+                        background: 'transparent', cursor: 'pointer',
+                        color: 'var(--color-text-secondary, #71717a)',
+                        opacity: exporting ? 0.5 : 1,
+                    }}
                 >
-                    <Download size={12} />
-                    PNG
+                    <Download size={12} /> PNG
                 </button>
+                {/* PDF button — FOLLO GANTT-DONE: blue bg, white text, no border */}
                 <button
                     onClick={exportPDF}
                     disabled={exporting}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', fontSize: 11, borderRadius: 6, background: '#2563eb', color: '#fff', cursor: 'pointer', border: 'none', opacity: exporting ? 0.5 : 1 }}
+                    style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                        border: 'none', background: '#2563eb', cursor: 'pointer',
+                        color: '#fff',
+                        opacity: exporting ? 0.5 : 1,
+                    }}
                 >
-                    <Download size={12} />
-                    PDF
+                    <Download size={12} /> PDF
                 </button>
             </div>
 
@@ -554,26 +592,51 @@ export default function ProjectGantt({ tasks, project }) {
             ) : (
 
             <div ref={scrollRef} className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-            <div ref={ganttRef} id="gantt-export-area" style={{ minWidth: totalWidth + LEFT_COL }}>
+            <div ref={ganttRef} id="gantt-export-area" style={{ minWidth: totalWidth + LEFT_COL, width: '100%' }}>
 
-            {/* ── DATE HEADER (grid: left col + timeline) ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: `${LEFT_COL}px 1fr`, marginBottom: 2 }}>
-                <div style={{ fontSize: 10, color: 'var(--color-text-tertiary, #a1a1aa)', padding: '0 12px', letterSpacing: '.05em', display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
-                    TASK / ASSIGNEE
+            {/* ── DATE HEADER (flex: frozen corner + timeline) — FOLLO GANTT-DONE: matches GanttWidget ── */}
+            <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 20, height: HEADER_H }}>
+                {/* Corner cell: frozen left + sticky top */}
+                <div
+                    className="bg-zinc-50 dark:bg-zinc-800/30 border-b border-r border-zinc-200 dark:border-zinc-800"
+                    style={{
+                        width: LEFT_COL, minWidth: LEFT_COL,
+                        position: 'sticky', left: 0, zIndex: 30,
+                        display: 'flex', alignItems: 'flex-end', padding: '0 12px',
+                    }}
+                >
+                    <span style={{ fontSize: 10, color: 'var(--color-text-tertiary, #a1a1aa)', letterSpacing: '.05em', paddingBottom: 4 }}>TASK / ASSIGNEE</span>
                 </div>
-                <div style={{ display: 'flex' }}>
+
+                {/* Day/Week/Month header cells */}
+                <div
+                    className="bg-zinc-50 dark:bg-zinc-800/30 border-b border-zinc-200 dark:border-zinc-800"
+                    style={{ display: 'flex', flex: 1, minWidth: totalWidth }}
+                >
                     {scaleMode === 'day' ? days.map(day => {
                         const isToday = differenceInDays(day, today) === 0;
                         return (
                             <div
                                 key={day.toISOString()}
-                                style={{ flex: `0 0 ${DAY_WIDTH}px`, textAlign: 'center', fontSize: 10, color: isToday ? 'var(--color-text-secondary, #52525b)' : 'var(--color-text-tertiary, #a1a1aa)', fontWeight: isToday ? 500 : 400 }}
+                                style={{
+                                    flex: `0 0 ${DAY_WIDTH}px`, textAlign: 'center', fontSize: 10,
+                                    color: isToday ? 'var(--color-text-secondary, #52525b)' : 'var(--color-text-tertiary, #a1a1aa)',
+                                    fontWeight: isToday ? 500 : 400,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}
                             >
                                 {format(day, 'MMM d')}
                             </div>
                         );
                     }) : scaleColumns.map(col => (
-                        <div key={col.key} style={{ flex: `0 0 ${col.width}px`, textAlign: 'center', fontSize: 10, color: 'var(--color-text-tertiary, #a1a1aa)' }}>
+                        <div
+                            key={col.key}
+                            style={{
+                                flex: `0 0 ${col.width}px`, textAlign: 'center', fontSize: 10,
+                                color: 'var(--color-text-tertiary, #a1a1aa)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                        >
                             {col.label}
                         </div>
                     ))}
@@ -590,6 +653,9 @@ export default function ProjectGantt({ tasks, project }) {
                     const state  = getTaskBarState(task, today);
                     const colors = getProgressBarColors(state);
 
+                    // FOLLO GANTT-DONE — compute done state for three-state rendering
+                    const doneInfo = state.isDone ? getDoneState(task) : null;
+
                     // Actual progress bar extents
                     const actualStartX = task.actualStartDate
                         ? differenceInDays(startOfDay(new Date(task.actualStartDate)), startDate) * DAY_WIDTH
@@ -597,22 +663,43 @@ export default function ProjectGantt({ tasks, project }) {
                     const todayX = todayOffset + DAY_WIDTH / 2;
                     const plannedEndX = plannedStartX + plannedWidth;
 
+                    // FOLLO GANTT-DONE — for done tasks use actualEndDate ?? updatedAt as completion point
+                    const doneCompletedX = (state.isDone && doneInfo?.completedAt)
+                        ? differenceInDays(startOfDay(doneInfo.completedAt), startDate) * DAY_WIDTH + DAY_WIDTH
+                        : plannedEndX;
+
                     const actualEndX = state.isDone
-                        ? (task.completedAt
-                            ? differenceInDays(startOfDay(new Date(task.completedAt)), startDate) * DAY_WIDTH + DAY_WIDTH
-                            : plannedEndX)
+                        ? doneCompletedX
                         : todayX;
                     const actualWidth = Math.max(actualEndX - actualStartX, 0);
 
                     const rawSpillWidth = state.isOverdue ? Math.max(todayX - plannedEndX, 0) : 0;
                     const clampedSpillWidth = Math.min(rawSpillWidth, DAY_WIDTH * MAX_SPILL_COLS);
 
-                    // Row styling per reference
+                    // FOLLO GANTT-DONE — done-late: extension bar from dueDate → completedAt
+                    const doneLateSpillWidth = (state.isDone && doneInfo?.type === 'late')
+                        ? Math.max(0, Math.min(doneCompletedX - plannedEndX, totalWidth - plannedEndX))
+                        : 0;
+
+                    // Normal rows (no special tint) use same bg as header for consistency
+                    const hasTint = state.isOverdue || state.isBlocked
+                        || (state.isDone && doneInfo?.type === 'late')
+                        || (state.isDone && doneInfo?.type === 'early');
+                    const tintBg = state.isOverdue ? '#fff5f5'
+                        : state.isBlocked ? '#fffbeb'
+                        : (state.isDone && doneInfo?.type === 'late') ? '#fff7f7'
+                        : '#f0fdf4';
+
+                    // Row styling per reference — FOLLO GANTT-DONE adds done-early/late tinting
                     const rowStyle = {
                         display: 'grid', gridTemplateColumns: `${LEFT_COL}px 1fr`, alignItems: 'center',
                         height: ROW_HEIGHT, borderRadius: 7,
-                        background: state.isOverdue ? '#fff5f5' : state.isBlocked ? '#fffbeb' : 'var(--color-background-secondary, #fafafa)',
-                        border: state.isOverdue ? '0.5px solid #fecaca' : state.isBlocked ? '0.5px solid #fde68a' : 'none',
+                        background: hasTint ? tintBg : '#fafafa',
+                        border: state.isOverdue ? '0.5px solid #fecaca'
+                            : state.isBlocked ? '0.5px solid #fde68a'
+                            : (state.isDone && doneInfo?.type === 'late') ? '0.5px solid #fecaca'
+                            : (state.isDone && doneInfo?.type === 'early') ? '0.5px solid #bbf7d0'
+                            : 'none',
                         boxShadow: state.isBlocked ? '0 0 0 3px rgba(217,119,6,.08)' : undefined,
                         cursor: 'pointer',
                     };
@@ -623,39 +710,46 @@ export default function ProjectGantt({ tasks, project }) {
                             style={rowStyle}
                             onClick={() => setSelectedTask(selectedTask?.id === task.id ? null : task)}
                         >
-                            {/* LEFT COLUMN: task name + assignee subtitle */}
-                            <div style={{ padding: '0 12px', overflow: 'hidden' }}>
-                                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary, #18181b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {task.title}
+                            {/* LEFT COLUMN: frozen, solid bg so scrolled bars don't show through */}
+                            <div
+                                style={{
+                                    padding: '0 12px', overflow: 'hidden',
+                                    position: 'sticky', left: 0, zIndex: 10, flexShrink: 0, width: LEFT_COL,
+                                    display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                                    background: hasTint ? tintBg : '#fafafa',
+                                }}
+                                title={task.status !== 'DONE' ? `Completing this task adds ${calcTaskContribution(task, tasks)}% to project progress` : undefined}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary, #18181b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                        {task.title}
+                                    </div>
+                                    <StatusBadge status={task.status} slaStatus={task.slaStatus} />
                                 </div>
-                                <div style={{ fontSize: 10, marginTop: 1, color: state.isOverdue ? '#dc2626' : state.isBlocked ? '#d97706' : state.isDone ? '#16a34a' : 'var(--color-text-tertiary, #a1a1aa)' }}>
-                                    {task.assignee?.name || task.assignee?.firstName || task.assignee?.email || 'Unassigned'}
-                                    {state.isOverdue && ` · ${state.daysOverdue}d overdue`}
-                                    {state.isBlocked && ' · Blocked'}
-                                    {state.isDone && ' · Completed'}
-                                    {state.isActive && state.daysUntilDue !== null && !state.isOverdue && ` · ${state.daysUntilDue}d left`}
+                                <div style={{ fontSize: 10, marginTop: 2, color: state.isOverdue ? '#dc2626' : state.isBlocked ? '#d97706' : state.isDone ? '#16a34a' : 'var(--color-text-tertiary, #a1a1aa)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {task.assignee?.name || task.assignee?.firstName || task.assignee?.email || 'Unassigned'}
+                                    </span>
+                                    <SmartTimeLabel task={task} state={state} />
                                 </div>
+                                {/* FOLLO GANTT-DONE — project name line removed: single-project view, not needed */}
                             </div>
 
                             {/* RIGHT COLUMN: timeline area */}
                             <div style={{ position: 'relative', height: ROW_HEIGHT, display: 'flex', alignItems: 'center' }}>
                                 {/* Today line inside row */}
                                 {todayOffset >= 0 && todayOffset <= totalWidth && (
-                                    <div style={{ position: 'absolute', left: todayOffset + DAY_WIDTH / 2, top: 0, bottom: 0, width: '1.5px', background: state.isOverdue ? '#dc2626' : '#2563eb', opacity: state.isOverdue ? 0.35 : 0.2, zIndex: 4, pointerEvents: 'none' }} />
+                                    <div style={{ position: 'absolute', left: todayOffset + DAY_WIDTH / 2, top: 0, bottom: 0, width: '1.5px', background: state.isOverdue ? '#dc2626' : '#2563eb', opacity: state.isOverdue ? 0.35 : 0.3, zIndex: 4, pointerEvents: 'none' }} />
                                 )}
 
-                                {/* Faint project label (inside timeline area, left edge) */}
-                                <div style={{ position: 'absolute', left: 3, fontSize: 10, color: 'var(--color-text-tertiary, #a1a1aa)', opacity: 0.45, pointerEvents: 'none' }}>
-                                    {project?.name ?? ''}
-                                </div>
-
-                                {/* Ghost track (scheduled bar) */}
+                                {/* Ghost track (scheduled bar) — FOLLO GANTT-DONE: always show for done tasks */}
                                 {task.plannedStartDate && task.dueDate && (
                                     <div
                                         style={{
                                             position: 'absolute', left: Math.max(0, plannedStartX), width: plannedWidth,
-                                            height: BAR_H, background: 'var(--color-border-tertiary, #d4d4d8)', borderRadius: 3,
-                                            opacity: state.isTodo ? 0.5 : undefined,
+                                            height: BAR_H,
+                                            background: 'var(--color-border-tertiary, #d4d4d8)', borderRadius: 3,
+                                            opacity: state.isTodo ? 0.5 : state.isDone ? 0.4 : undefined,
                                             cursor: !locked && canCreateTasks ? 'grab' : 'default',
                                         }}
                                         className={isDragging ? 'cursor-grabbing shadow-lg' : ''}
@@ -672,8 +766,32 @@ export default function ProjectGantt({ tasks, project }) {
                                     </div>
                                 )}
 
-                                {/* Progress bar (blue / green / amber) */}
-                                {(state.hasStarted || state.isOverdue) && (state.isOverdue ? plannedWidth : actualWidth) > 0 && (
+                                {/* FOLLO GANTT-DONE — three-state DONE bar rendering */}
+                                {state.isDone && doneInfo ? (() => {
+                                    if (doneInfo.type === 'late') {
+                                        // Late: blue planned bar + red extension to completedAt
+                                        const barLeft = Math.max(0, actualStartX);
+                                        const barWidth = Math.max(plannedEndX - barLeft, 0);
+                                        return (
+                                            <>
+                                                <div style={{ position: 'absolute', left: barLeft, width: barWidth, height: BAR_H, background: '#93c5fd', borderRadius: '3px 0 0 3px', pointerEvents: 'none', opacity: 0.9 }} />
+                                                {doneLateSpillWidth > 0 && (
+                                                    <div style={{ position: 'absolute', left: plannedEndX, width: doneLateSpillWidth, height: BAR_H, background: '#dc2626', borderRadius: '0 3px 3px 0', pointerEvents: 'none', opacity: 0.85 }} />
+                                                )}
+                                            </>
+                                        );
+                                    }
+                                    // On-time or early: solid green bar from actualStartX → completedAt (or plannedEndX for on-time)
+                                    const barLeft = Math.max(0, actualStartX);
+                                    const barRight = doneInfo.type === 'early' ? Math.min(doneCompletedX, plannedEndX) : plannedEndX;
+                                    const barWidth = Math.max(barRight - barLeft, 0);
+                                    return (
+                                        <div style={{ position: 'absolute', left: barLeft, width: barWidth, height: BAR_H, background: '#16a34a', borderRadius: 3, pointerEvents: 'none', opacity: 0.9 }} />
+                                    );
+                                })() : null}
+
+                                {/* Progress bar (blue / green / amber) — for non-DONE tasks */}
+                                {!state.isDone && (state.hasStarted || state.isOverdue) && (state.isOverdue ? plannedWidth : actualWidth) > 0 && (
                                     <div
                                         style={{
                                             position: 'absolute', left: state.isOverdue ? Math.max(0, plannedStartX) : actualStartX,
@@ -681,7 +799,6 @@ export default function ProjectGantt({ tasks, project }) {
                                             height: BAR_H, background: colors.fill,
                                             borderRadius: state.isOverdue ? '3px 0 0 3px' : 3,
                                             overflow: 'hidden', pointerEvents: 'none',
-                                            opacity: state.isDone ? 0.9 : undefined,
                                             animation: colors.breathe ? 'gantt-breathe 2s ease-in-out infinite' : undefined,
                                         }}
                                     >
@@ -690,11 +807,19 @@ export default function ProjectGantt({ tasks, project }) {
                                                 <div style={{ position: 'absolute', top: 0, left: 0, width: '40%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.4),transparent)', animation: 'gantt-shimmer 2s ease-in-out infinite' }} />
                                             </div>
                                         )}
+                                        {/* Completion % overlay for IN_PROGRESS tasks with completionWeight */}
+                                        {state.isActive && task.completionWeight > 0 && (
+                                            <div style={{
+                                                position: 'absolute', left: 0, top: 0, height: '100%',
+                                                width: `${Math.min(100, task.completionWeight)}%`,
+                                                background: 'rgba(0,0,0,0.18)', borderRadius: 'inherit', pointerEvents: 'none',
+                                            }} />
+                                        )}
                                     </div>
                                 )}
 
-                                {/* Overdue spill (red extension) */}
-                                {state.isOverdue && clampedSpillWidth > 0 && (
+                                {/* Overdue spill (red extension) — non-DONE only */}
+                                {!state.isDone && state.isOverdue && clampedSpillWidth > 0 && (
                                     <div style={{
                                         position: 'absolute', left: plannedEndX, height: BAR_H,
                                         background: '#dc2626', borderRadius: '0 3px 3px 0', pointerEvents: 'none',
@@ -722,19 +847,39 @@ export default function ProjectGantt({ tasks, project }) {
                                         style={{ position: 'absolute', left: differenceInDays(startOfDay(new Date(task.baselineDueDate)), startDate) * DAY_WIDTH, top: '50%', transform: 'translateY(-50%)', width: 2, height: 14, background: 'var(--color-text-tertiary, #a1a1aa)', opacity: 0.35, borderRadius: 1, zIndex: 1, pointerEvents: 'none' }} />
                                 )}
 
-                                {/* Inline status label */}
+                                {/* FOLLO GANTT-DONE — Inline status label with three-state done support */}
                                 {(() => {
                                     let label = null;
                                     let color = '#a1a1aa';
                                     let bg = undefined;
-                                    let x = actualStartX + (state.isOverdue ? plannedWidth + clampedSpillWidth : actualWidth) + 8;
+                                    // For done-late: label after red extension bar
+                                    // For done-early/on-time: label after green bar
+                                    // For overdue: label after spill bar; others: after actual bar
+                                    let x = state.isOverdue
+                                        ? plannedEndX + clampedSpillWidth + 6
+                                        : actualStartX + actualWidth + 8;
 
-                                    if (state.isDone)         { label = '✓ done'; color = '#16a34a'; }
-                                    else if (state.isBlocked) { label = 'blocked'; color = '#d97706'; bg = '#fef3c7'; }
+                                    if (state.isDone && doneInfo) {
+                                        if (doneInfo.type === 'on-time') {
+                                            label = '✓'; color = '#16a34a';
+                                            x = plannedEndX + 6;
+                                        } else if (doneInfo.type === 'early') {
+                                            const d = doneInfo.daysEarly;
+                                            const lbl = d >= 7 ? `${Math.floor(d/7)}w early` : `${d}d early`;
+                                            label = `✓ ${lbl}`; color = '#16a34a';
+                                            x = Math.min(doneCompletedX, plannedEndX) + 6;
+                                        } else {
+                                            // late
+                                            const d = doneInfo.daysLate;
+                                            const lbl = d >= 7 ? `${Math.floor(d/7)}w late` : `${d}d late`;
+                                            label = `✓ +${lbl}`; color = '#dc2626';
+                                            x = plannedEndX + doneLateSpillWidth + 6;
+                                        }
+                                    } else if (state.isBlocked) { label = 'blocked'; color = '#d97706'; bg = '#fef3c7'; }
                                     else if (state.isPending) { label = 'awaiting approval'; color = '#3b82f6'; }
-                                    else if (state.isOverdue) { label = `+${state.daysOverdue}d`; color = '#dc2626'; x = plannedEndX + clampedSpillWidth + 6; }
-                                    else if (state.isAtRisk)  { label = `${state.daysUntilDue}d left`; color = '#f97316'; }
-                                    else if (state.isActive && state.daysUntilDue !== null) { label = `${state.daysUntilDue}d left`; }
+                                    else if (state.isOverdue) { label = getTimeOverdueShort(task.dueDate); color = '#dc2626'; }
+                                    else if (state.isAtRisk)  { label = getTimeLeftShort(task.dueDate); /* bar is blue; label uses default gray */ }
+                                    else if (state.isActive && state.daysUntilDue !== null) { label = getTimeLeftShort(task.dueDate); }
                                     else if (state.isTodo && task.plannedStartDate) {
                                         const sd = new Date(task.plannedStartDate);
                                         label = `starts ${sd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
@@ -745,6 +890,7 @@ export default function ProjectGantt({ tasks, project }) {
                                             position: 'absolute', top: ROW_HEIGHT / 2 - 7, left: x,
                                             fontSize: 10, color, fontWeight: 500, whiteSpace: 'nowrap', pointerEvents: 'none',
                                             background: bg, padding: bg ? '1px 6px' : undefined, borderRadius: bg ? 3 : undefined,
+                                            zIndex: 5,
                                         }}>
                                             {label}
                                         </div>
@@ -767,14 +913,11 @@ export default function ProjectGantt({ tasks, project }) {
                 )}
             </div>
 
-            {/* TODAY label (below the chart body) */}
-            <div style={{ display: 'grid', gridTemplateColumns: `${LEFT_COL}px 1fr`, marginTop: 4 }}>
-                <div />
-                <div style={{ position: 'relative', height: 14 }}>
-                    {todayOffset >= 0 && todayOffset <= totalWidth && (
-                        <div style={{ position: 'absolute', left: todayOffset + DAY_WIDTH / 2 - 14, fontSize: 10, color: '#2563eb', fontWeight: 500 }}>TODAY</div>
-                    )}
-                </div>
+            {/* TODAY label below chart body — FOLLO GANTT-DONE: matched GanttWidget style */}
+            <div style={{ position: 'relative', height: 20, marginTop: 2 }}>
+                {todayOffset >= 0 && todayOffset <= totalWidth && (
+                    <div style={{ position: 'absolute', left: LEFT_COL + todayOffset + DAY_WIDTH / 2, transform: 'translateX(-50%)', fontSize: 9, color: '#2563eb', fontWeight: 600, letterSpacing: '0.05em' }}>TODAY</div>
+                )}
             </div>
 
             </div>

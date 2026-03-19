@@ -1,4 +1,5 @@
 // FOLLO FIX
+// FOLLO SECURITY
 /**
  * Production-grade error handling
  * Centralized error handler - never expose stack traces to client
@@ -101,18 +102,21 @@ export class DatabaseError extends AppError {
  * @param {import('express').NextFunction} next
  */
 export function errorHandler(err, req, res, next) {
-  // Log error server-side with full details
+  const requestId = req.requestId ?? 'unknown';
+
+  // Log error server-side with full details — never log req.body or authorization headers
   const logPayload = {
+    requestId,
     timestamp: new Date().toISOString(),
-    method: req.method,
-    path: req.path,
-    userId: req.userId || 'anonymous',
+    method:    req.method,
+    path:      req.path,
+    userId:    req.userId || 'anonymous',
     errorName: err.name,
     errorMessage: err.message,
     errorCode: err.code || ERROR_CODES.INTERNAL_ERROR,
-    stack: err.stack,
+    stack:     err.stack,
   };
-  
+
   // Log full error in development, structured JSON in production
   if (process.env.NODE_ENV === 'development') {
     console.error('Error:', logPayload);
@@ -121,14 +125,15 @@ export function errorHandler(err, req, res, next) {
     const { stack, ...safePayload } = logPayload;
     console.error(JSON.stringify(safePayload));
   }
-  
+
   // Handle known operational errors
   if (err instanceof AppError) {
     return sendError(res, {
       statusCode: err.statusCode,
-      code: err.code,
-      message: err.message,
-      details: err.details,
+      code:       err.code,
+      message:    err.message,
+      details:    err.details,
+      requestId,
     });
   }
   
@@ -153,8 +158,11 @@ export function errorHandler(err, req, res, next) {
   // Handle unknown errors - never expose internal details to client
   return sendError(res, {
     statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
-    code: ERROR_CODES.INTERNAL_ERROR,
-    message: 'An unexpected error occurred. Please try again later.',
+    code:       ERROR_CODES.INTERNAL_ERROR,
+    message:    process.env.NODE_ENV === 'production'
+                  ? 'An unexpected error occurred'
+                  : err.message,
+    requestId,
   });
 }
 

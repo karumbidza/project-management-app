@@ -1,7 +1,8 @@
 // FOLLO PROJECTS-PAGE
 // FOLLO PROJECTS-C
 // FOLLO CLEAN-NAV
-import { useState, useEffect, useMemo } from "react";
+// FOLLO INSTANT
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSelector, shallowEqual } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { AlertCircle } from "lucide-react";
@@ -75,10 +76,23 @@ export default function Projects() {
     const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
     const [search, setSearch] = useState('');
 
-    // Default to first project
+    // FOLLO INSTANT — Auto-select first project on load, and select newest project when list grows
+    const prevProjectsLengthRef = useRef(projects.length);
     useEffect(() => {
-        if (projects.length > 0 && !selectedId) {
+        const prevLen = prevProjectsLengthRef.current;
+        prevProjectsLengthRef.current = projects.length;
+
+        if (projects.length === 0) return;
+
+        // Initial load — select first project
+        if (!selectedId) {
             setSelectedId(projects[0].id);
+            return;
+        }
+
+        // A project was just added — select it immediately
+        if (projects.length > prevLen) {
+            setSelectedId(projects[projects.length - 1].id);
         }
     }, [projects]);
 

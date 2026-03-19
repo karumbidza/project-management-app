@@ -222,7 +222,7 @@ export function validate(schema, source = 'body') {
         error: {
           code: 'VALIDATION_ERROR',
           message: 'Validation failed',
-          details: result.error.errors.map(e => ({
+          details: result.error.issues.map(e => ({
             field: e.path.join('.'),
             message: e.message,
           })),
@@ -248,7 +248,7 @@ export function validateAll(schemas) {
       const result = schema.safeParse(req[source]);
       
       if (!result.success) {
-        errors.push(...result.error.errors.map(e => ({
+        errors.push(...result.error.issues.map(e => ({
           field: `${source}.${e.path.join('.')}`,
           message: e.message,
         })));

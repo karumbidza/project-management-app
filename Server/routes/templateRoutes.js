@@ -1,4 +1,5 @@
 // FOLLO SLA — Phase 7 + Phase 8: Template Routes with Permissions
+// FOLLO SECURITY
 import express from "express";
 import {
     listTaskTemplates,
@@ -21,21 +22,23 @@ import {
 const router = express.Router();
 
 // ━━━ Task Templates ━━━
-// Read: any workspace member.  Write: workspace admin only.
-router.get("/tasks", requireWorkspaceMemberMiddleware, listTaskTemplates);
-router.get("/tasks/:id", getTaskTemplate);
-router.post("/tasks", requireWorkspaceMemberMiddleware, createTaskTemplate);
-router.put("/tasks/:id", updateTaskTemplate);
-router.delete("/tasks/:id", deleteTaskTemplate);
+// FOLLO SECURITY — all routes require workspace membership
+router.get("/tasks",     requireWorkspaceMemberMiddleware, listTaskTemplates);
+router.get("/tasks/:id", requireWorkspaceMemberMiddleware, getTaskTemplate);
+router.post("/tasks",    requireWorkspaceMemberMiddleware, createTaskTemplate);
+router.put("/tasks/:id", requireWorkspaceMemberMiddleware, updateTaskTemplate);
+router.delete("/tasks/:id", requireWorkspaceMemberMiddleware, deleteTaskTemplate);
 
 // ━━━ Project Templates ━━━
-router.get("/projects", requireWorkspaceMemberMiddleware, listProjectTemplates);
-router.get("/projects/:id", getProjectTemplate);
-router.post("/projects", requireWorkspaceMemberMiddleware, createProjectTemplate);
-router.put("/projects/:id", updateProjectTemplate);
-router.delete("/projects/:id", deleteProjectTemplate);
+// FOLLO SECURITY — all routes require workspace membership
+router.get("/projects",     requireWorkspaceMemberMiddleware, listProjectTemplates);
+router.get("/projects/:id", requireWorkspaceMemberMiddleware, getProjectTemplate);
+router.post("/projects",    requireWorkspaceMemberMiddleware, createProjectTemplate);
+router.put("/projects/:id", requireWorkspaceMemberMiddleware, updateProjectTemplate);
+router.delete("/projects/:id", requireWorkspaceMemberMiddleware, deleteProjectTemplate);
 
 // ━━━ Apply Template (project manager check is in controller) ━━━
-router.post("/projects/:id/apply", applyProjectTemplate);
+// FOLLO SECURITY — workspace membership required before controller checks project role
+router.post("/projects/:id/apply", requireWorkspaceMemberMiddleware, applyProjectTemplate);
 
 export default router;

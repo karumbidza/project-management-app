@@ -2,12 +2,15 @@
 // FOLLO SRP
 // FOLLO WORKFLOW
 // FOLLO DEPS
+// FOLLO ASSIGN
+// FOLLO TASK-UI
 import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
 import { useSelector, useDispatch } from "react-redux";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useUser, useAuth } from "@clerk/clerk-react";
+import { io as ioClient } from "socket.io-client";
 import { updateTaskAsync } from "../features/taskSlice";
 import { addCommentAsync } from "../features/commentSlice";
 import {
@@ -55,7 +58,7 @@ const TaskDetails = () => {
     const { user } = useUser();
     const { getToken } = useAuth();
     const dispatch = useDispatch();
-    const { canSubmitTask, canApproveReject, canRaiseBlocker, canResolveBlocker } = useUserRole();
+    const { canSubmitTask, canApproveReject, canRaiseBlocker, canResolveBlocker, canAssignTasks } = useUserRole();
     
     const [task, setTask] = useState(null);
     const [project, setProject] = useState(null);
@@ -110,8 +113,23 @@ const TaskDetails = () => {
 
     const { currentWorkspace, myProjects } = useSelector((state) => state.workspace);
 
+    // FOLLO ASSIGN — workspace members with project-membership flag
+    const workspaceMembers = useMemo(() => {
+        const members = currentWorkspace?.members || [];
+        const projectMemberIds = new Set(
+            (project?.members || []).map(m => m.userId || m.user?.id)
+        );
+        return members.map(m => ({
+            ...m,
+            isProjectMember: projectMemberIds.has(m.userId || m.user?.id),
+        }));
+    }, [currentWorkspace?.members, project?.members]);
+
     // Auto-scroll chat to bottom
     const chatEndRef = useRef(null);
+    // Stable ref to current user ID for socket event filtering
+    const userIdRef = useRef(user?.id);
+    userIdRef.current = user?.id;
     // Track pending optimistic comments so polling doesn't wipe them
     const pendingCommentIds = useRef(new Set());
     // Track confirmed comment IDs for tick UI (auto-clears after a few seconds)
@@ -435,6 +453,23 @@ const TaskDetails = () => {
         }
     };
 
+    // FOLLO ASSIGN — update task assignee (or any field)
+    const handleUpdateTask = async (data) => {
+        try {
+            await dispatch(updateTaskAsync({
+                taskId: task.id,
+                projectId,
+                taskData: data,
+                getToken,
+            })).unwrap();
+            fetchTaskDetails();
+            toast.success('Task updated');
+        } catch (err) {
+            toast.error(err?.message || err || 'Failed to update task');
+            throw err;
+        }
+    };
+
     // FOLLO WORKFLOW — toggle priority manual override
     const handleTogglePriorityOverride = async () => {
         try {
@@ -604,6 +639,32 @@ const TaskDetails = () => {
         return () => clearInterval(interval);
     }, [taskId]); // eslint-disable-line react-hooks-exhaustive-deps
 
+    // FOLLO TASK-UI — Real-time Socket.IO listener for task updates
+    useEffect(() => {
+        if (!projectId) return;
+        const socket = ioClient(
+            import.meta.env.VITE_API_URL || 'http://localhost:5001',
+            { withCredentials: true }
+        );
+        socket.emit('join_project', projectId);
+
+        socket.on('task_updated', ({ task: updatedTask, lastUpdatedById }) => {
+            if (!updatedTask || updatedTask.id !== taskId) return;
+            if (lastUpdatedById === userIdRef.current) return;
+            fetchTaskDetails({ silent: true });
+            dispatch(fetchTaskSlaAsync({ taskId, getToken }))
+                .unwrap()
+                .then(result => setSlaData(result?.sla))
+                .catch(() => {});
+        });
+
+        return () => {
+            socket.emit('leave_project', projectId);
+            socket.off('task_updated');
+            socket.disconnect();
+        };
+    }, [projectId, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // FOLLO DEPS — fetch project tasks for dependency picker
     useEffect(() => {
         if (!projectId) return;
@@ -704,7 +765,7 @@ const TaskDetails = () => {
             {/* Right: Task + Project Info */}
             <div className="w-full lg:w-1/2 flex flex-col gap-6">
                 <TaskSLABanner task={task} />
-                <TaskInfoCard task={task} formatDate={formatDate} canManagePriority={canApproveReject} onTogglePriorityOverride={handleTogglePriorityOverride} />
+                <TaskInfoCard task={task} formatDate={formatDate} canManagePriority={canApproveReject} onTogglePriorityOverride={handleTogglePriorityOverride} canAssign={canAssignTasks} workspaceMembers={workspaceMembers} onUpdateTask={handleUpdateTask} />
                 {/* FOLLO DEPS — Task Dependencies */}
                 <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
                     <TaskDependencies
@@ -759,7 +820,7 @@ const TaskDetails = () => {
                     showDenyExtensionForm={showDenyExtensionForm} setShowDenyExtensionForm={setShowDenyExtensionForm}
                     denyExtensionReason={denyExtensionReason} setDenyExtensionReason={setDenyExtensionReason}
                 />
-                <ProjectInfoCard project={project} formatDate={formatDate} />
+                <ProjectInfoCard project={project} task={task} userId={user?.id} />
             </div>
         </div>
     );

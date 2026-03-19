@@ -1,5 +1,8 @@
 // FOLLO AUTH-FIX
 // FOLLO PERF
+// FOLLO ACTION-CARDS
+// FOLLO CARD-HISTORY
+// FOLLO GANTT-FINAL
 /**
  * Workspace Controller
  * Handles workspace CRUD and member management
@@ -11,6 +14,7 @@ import {
   NotFoundError,
   ConflictError,
   AuthorizationError,
+  ValidationError,
 } from "../utils/errors.js";
 import {
   sendSuccess,
@@ -197,13 +201,24 @@ export const getUserWorkspaces = asyncHandler(async (req, res) => {
                   dueDate: true,
                   isDelayed: true,
                   assigneeId: true,
+                  projectId: true,
                   slaStatus: true,
                   completionWeight: true,
                   plannedStartDate: true,
                   plannedEndDate: true,
                   actualStartDate: true,
+                  actualEndDate: true, // FOLLO GANTT-DONE
+                  updatedAt: true,
+                  // FOLLO ACTION-CARDS — fields for dashboard action panels
                   extensionStatus: true,
+                  extensionReason: true,
+                  extensionProposedDate: true,
+                  extensionOriginalDueDate: true,
                   blockerRaisedAt: true,
+                  blockerDescription: true,
+                  completionNotes: true,
+                  completionPhotos: true,
+                  submittedAt: true,
                   assignee: { select: userSelect },
                 },
               },
@@ -361,4 +376,121 @@ export const getAllUsers = asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, users);
+});
+
+// FOLLO GANTT-FINAL
+function getTaskWeightServer(task) {
+  if (task.completionWeight && task.completionWeight > 0) return task.completionWeight;
+  const start = task.plannedStartDate ? new Date(task.plannedStartDate) : null;
+  const end   = task.dueDate ? new Date(task.dueDate)
+              : task.plannedEndDate ? new Date(task.plannedEndDate) : null;
+  if (start && end && end > start) return Math.max(1, Math.ceil((end - start) / 86400000));
+  return 1;
+}
+
+/**
+ * Get dashboard stats including monthly resolved counts
+ * GET /api/v1/workspaces/dashboard/stats?workspaceId=xxx
+ * FOLLO CARD-HISTORY
+ */
+export const getDashboardStats = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId } = req.query;
+
+  if (!workspaceId) throw new ValidationError('workspaceId is required');
+
+  const membership = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId },
+  });
+  if (!membership) throw new AuthorizationError('Not a workspace member');
+
+  const projects = await prisma.project.findMany({
+    where: { workspaceId },
+    select: { id: true },
+  });
+  const projectIds = projects.map(p => p.id);
+
+  // FOLLO CARD-HISTORY
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const baseWhere = {
+    task: { projectId: { in: projectIds } },
+    createdAt: { gte: monthStart },
+  };
+
+  const [
+    approvalsResolvedThisMonth,
+    blockersResolvedThisMonth,
+    breachesResolvedThisMonth,
+    extensionsResolvedThisMonth,
+  ] = await Promise.all([
+    prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['APPROVED', 'REJECTED'] } } }),
+    prisma.slaEvent.count({ where: { ...baseWhere, type: 'BLOCKER_RESOLVED' } }),
+    prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['APPROVED', 'BREACHED'] } } }),
+    prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['EXTENSION_APPROVED', 'EXTENSION_DENIED'] } } }),
+  ]);
+
+  return sendSuccess(res, {
+    approvalsResolvedThisMonth,
+    blockersResolvedThisMonth,
+    breachesResolvedThisMonth,
+    extensionsResolvedThisMonth,
+  });
+});
+
+/**
+ * Get dashboard history events for a given set of SLA event types
+ * GET /api/v1/workspaces/dashboard/history?workspaceId=xxx&types=APPROVED,REJECTED&limit=20
+ * FOLLO CARD-HISTORY
+ */
+export const getDashboardHistory = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId, types, limit = '20' } = req.query;
+
+  if (!workspaceId) throw new ValidationError('workspaceId is required');
+
+  // Access check
+  const membership = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId },
+  });
+  if (!membership) throw new AuthorizationError('Not a workspace member');
+
+  const projects = await prisma.project.findMany({
+    where: { workspaceId },
+    select: { id: true },
+  });
+  const projectIds = projects.map(p => p.id);
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const typeFilter = types ? { type: { in: types.split(',') } } : {};
+
+  const events = await prisma.slaEvent.findMany({
+    where: {
+      task: { projectId: { in: projectIds } },
+      createdAt: { gte: monthStart },
+      ...typeFilter,
+    },
+    select: {
+      id: true,
+      type: true,
+      metadata: true,
+      createdAt: true,
+      task: {
+        select: {
+          id: true,
+          title: true,
+          project: { select: { id: true, name: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: parseInt(limit, 10),
+  });
+
+  return sendSuccess(res, events);
 });

@@ -3,10 +3,14 @@ node_modules/
 */node_modules/
 
 # Environment variables (SENSITIVE - contains API keys, DB passwords)
+# FOLLO SECURITY
 .env
 .env.local
+.env.production
 .env.*.local
+.env.*
 Server/.env
+Client/.env
 
 # Build outputs
 dist/

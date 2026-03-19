@@ -1,3 +1,4 @@
+// FOLLO SECURITY
 /**
  * Task Routes
  * /api/v1/tasks
@@ -17,13 +18,14 @@ import {
   getTaskActivities,
   recalculateTaskPriority,
 } from "../controllers/taskController.js";
-import { 
-  validate, 
-  createTaskSchema, 
+import {
+  validate,
+  createTaskSchema,
   updateTaskSchema,
   createDependencySchema,
   createCommentSchema,
 } from "../utils/validators.js";
+import { writeLimiter, commentLimiter } from "../middlewares/rateLimiter.js";
 
 const router = express.Router();
 
@@ -36,8 +38,9 @@ router.get("/project/:projectId", getProjectTasks);
 
 // POST /api/v1/tasks/project/:projectId - Create task in project
 router.post(
-  "/project/:projectId", 
-  validate(createTaskSchema), 
+  "/project/:projectId",
+  writeLimiter,
+  validate(createTaskSchema),
   createTask
 );
 
@@ -49,16 +52,16 @@ router.post(
 router.get("/:taskId", getTaskById);
 
 // PATCH /api/v1/tasks/:taskId - Update task
-router.patch("/:taskId", validate(updateTaskSchema), updateTask);
+router.patch("/:taskId", writeLimiter, validate(updateTaskSchema), updateTask);
 
 // PUT /api/v1/tasks/:taskId - Update task (legacy)
-router.put("/:taskId", validate(updateTaskSchema), updateTask);
+router.put("/:taskId", writeLimiter, validate(updateTaskSchema), updateTask);
 
 // DELETE /api/v1/tasks/:taskId - Delete task
-router.delete("/:taskId", deleteTask);
+router.delete("/:taskId", writeLimiter, deleteTask);
 
 // FOLLO WORKFLOW — recalculate priority for a task
-router.post("/:taskId/recalculate-priority", recalculateTaskPriority);
+router.post("/:taskId/recalculate-priority", writeLimiter, recalculateTaskPriority);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TASK DEPENDENCY ROUTES
@@ -69,13 +72,14 @@ router.get("/:taskId/dependencies", getTaskDependencies);
 
 // POST /api/v1/tasks/:taskId/dependencies - Add dependency
 router.post(
-  "/:taskId/dependencies", 
-  validate(createDependencySchema), 
+  "/:taskId/dependencies",
+  writeLimiter,
+  validate(createDependencySchema),
   addTaskDependency
 );
 
 // DELETE /api/v1/tasks/:taskId/dependencies/:dependencyId - Remove dependency
-router.delete("/:taskId/dependencies/:dependencyId", removeTaskDependency);
+router.delete("/:taskId/dependencies/:dependencyId", writeLimiter, removeTaskDependency);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TASK COMMENT ROUTES
@@ -83,8 +87,9 @@ router.delete("/:taskId/dependencies/:dependencyId", removeTaskDependency);
 
 // POST /api/v1/tasks/:taskId/comments - Add comment
 router.post(
-  "/:taskId/comments", 
-  validate(createCommentSchema), 
+  "/:taskId/comments",
+  commentLimiter,
+  validate(createCommentSchema),
   addTaskComment
 );
 

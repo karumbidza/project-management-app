@@ -1,5 +1,7 @@
 // FOLLO FIX
+// FOLLO INSTANT
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { useOrganizationList, useAuth } from '@clerk/clerk-react';
 import { useDispatch } from 'react-redux';
@@ -50,7 +52,10 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
             
             // Set this as the active organization
             await setActive({ organization: organization.id });
-            
+
+            // FOLLO INSTANT — prime localStorage so fetchWorkspaces.fulfilled selects the new workspace
+            localStorage.setItem('currentWorkspaceId', organization.id);
+
             // Refresh workspaces list (pass getToken directly)
             await dispatch(fetchWorkspaces(getToken));
             
@@ -76,7 +81,7 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
 
     if (!isOpen) return null;
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-md mx-4">
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-zinc-700">
@@ -135,7 +140,8 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 

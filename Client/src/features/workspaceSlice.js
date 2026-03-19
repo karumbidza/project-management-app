@@ -5,6 +5,8 @@
 // FOLLO WORKFLOW
 // FOLLO REALTIME
 // FOLLO BUGFIX-REFRESH
+// FOLLO ACTION-CARDS
+// FOLLO INSTANT
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { apiCall, API_V1 } from "./apiHelper";
 
@@ -523,16 +525,21 @@ const workspaceSlice = createSlice({
                 state.loadingStates.projects = true;
             })
             .addCase(createProjectAsync.fulfilled, (state, action) => {
+                // FOLLO INSTANT — preserve tasks from payload (template-seeded projects have pre-created tasks)
                 state.loadingStates.projects = false;
-                const project = { ...action.payload, tasks: [], members: action.payload.members || [] };
+                const project = { ...action.payload, tasks: action.payload.tasks || [], members: action.payload.members || [] };
                 if (state.currentWorkspace) {
                     state.currentWorkspace.projects = [...(state.currentWorkspace.projects || []), project];
                 }
                 state.workspaces = state.workspaces.map((w) =>
-                    w.id === action.payload.workspaceId 
+                    w.id === action.payload.workspaceId
                         ? { ...w, projects: [...(w.projects || []), project] }
                         : w
                 );
+                // FOLLO INSTANT — also update myProjects so member-view shows new project immediately
+                if (state.myProjects.length > 0) {
+                    state.myProjects = [...state.myProjects, project];
+                }
             })
             .addCase(createProjectAsync.rejected, (state, action) => {
                 state.loadingStates.projects = false;

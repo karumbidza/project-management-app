@@ -464,7 +464,7 @@ export const getProjectMembers = asyncHandler(async (req, res) => {
     include: { 
       members: { 
         include: { user: true },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { joinedAt: 'asc' },
       },
       workspace: { include: { members: true } },
     },

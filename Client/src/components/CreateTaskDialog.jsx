@@ -1,6 +1,7 @@
 // FOLLO FIX
 // FOLLO WORKFLOW
 // FOLLO DEPS
+// FOLLO ASSIGN
 import { useState, useMemo, useEffect } from "react";
 import { Calendar as CalendarIcon, FileStack } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
@@ -24,6 +25,13 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
     }, [currentWorkspace, myProjects, projectId]);
     
     const teamMembers = project?.members || [];
+    // FOLLO ASSIGN — show all workspace members, flag who is already on this project
+    const projectMemberIds = new Set(teamMembers.map(m => m.userId || m.user?.id));
+    const allMembers = (currentWorkspace?.members || []).map(m => ({
+        ...m,
+        isProjectMember: projectMemberIds.has(m.userId || m.user?.id),
+    }));
+    const assigneeList = allMembers.length > 0 ? allMembers : teamMembers.map(m => ({ ...m, isProjectMember: true }));
     const dispatch = useDispatch();
     const { getToken } = useAuth();
 
@@ -179,12 +187,19 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         <label className="text-sm font-medium">Assignee</label>
                         <select value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
                             <option value="">Unassigned</option>
-                            {teamMembers.map((member) => (
-                                <option key={member?.user.id} value={member?.user.id}>
-                                    {member?.user.name || member?.user.email}
-                                </option>
-                            ))}
+                            {assigneeList.map((member) => {
+                                const uid = member.userId || member.user?.id;
+                                const name = member.user?.name || member.name || member.user?.email || uid;
+                                return (
+                                    <option key={uid} value={uid}>
+                                        {name}{member.isProjectMember ? '' : ' (will be added to project)'}
+                                    </option>
+                                );
+                            })}
                         </select>
+                        <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>
+                            Assigning someone not yet on this project will add them automatically.
+                        </p>
                     </div>
 
                     {/* Start Date & Due Date */}
