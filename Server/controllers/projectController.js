@@ -1,7 +1,9 @@
+// FOLLO AUDIT
 // FOLLO PERF
 // FOLLO FIX
 // FOLLO SLA
 // FOLLO ACCESS
+// FOLLO INSTANT
 /**
  * Project Controller
  * Handles project CRUD and project member management
@@ -13,6 +15,7 @@ import {
   NotFoundError,
   ConflictError,
   AuthorizationError,
+  ValidationError,
 } from "../utils/errors.js";
 import {
   sendSuccess,
@@ -213,6 +216,7 @@ export const getProjectById = asyncHandler(async (req, res) => {
         orderBy: { createdAt: 'desc' },
       },
       workspace: { include: { members: true } },
+      pinnedLinks: { orderBy: { createdAt: 'asc' } }, // FOLLO PROJECT-OVERVIEW
     },
   });
 
@@ -232,7 +236,18 @@ export const getProjectById = asyncHandler(async (req, res) => {
     );
   }
 
-  sendSuccess(res, project);
+  // FOLLO PROJECT-OVERVIEW — recent SLA activity for activity feed
+  const recentActivity = await prisma.slaEvent.findMany({
+    where: { task: { projectId } },
+    select: {
+      id: true, type: true, metadata: true, createdAt: true,
+      task: { select: { id: true, title: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  });
+
+  sendSuccess(res, { ...project, recentActivity });
 });
 
 /**
@@ -414,6 +429,13 @@ export const updateProject = asyncHandler(async (req, res) => {
     },
   });
 
+  // FOLLO INSTANT: Invalidate project and workspace caches
+  invalidateCachePattern(CACHE_KEYS.workspaceProjects(project.workspaceId));
+  invalidateCache(CACHE_KEYS.project(projectId));
+  for (const m of project.members) {
+    invalidateCachePattern(CACHE_KEYS.userProjects(m.userId));
+  }
+
   sendSuccess(res, updatedProject, 'Project updated successfully');
 });
 
@@ -427,6 +449,7 @@ export const deleteProject = asyncHandler(async (req, res) => {
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
+    include: { members: { select: { userId: true } } },
   });
 
   if (!project) {
@@ -441,8 +464,17 @@ export const deleteProject = asyncHandler(async (req, res) => {
     );
   }
 
+  const memberIds = project.members.map(m => m.userId);
+
   // Cascading delete handled by Prisma schema
   await prisma.project.delete({ where: { id: projectId } });
+
+  // FOLLO INSTANT: Invalidate workspace and user project caches for all members
+  invalidateCachePattern(CACHE_KEYS.workspaceProjects(project.workspaceId));
+  for (const memberId of memberIds) {
+    invalidateCachePattern(CACHE_KEYS.userProjects(memberId));
+    invalidateCachePattern(CACHE_KEYS.userWorkspaces(memberId));
+  }
 
   sendNoContent(res);
 });
@@ -600,7 +632,12 @@ export const addProjectMember = asyncHandler(async (req, res) => {
       role: memberRole,
     }).catch(err => console.error('[Email] Failed to send project add notification:', err));
 
-    return sendCreated(res, { 
+    // FOLLO INSTANT: Invalidate project member and user project caches
+    invalidateCache(CACHE_KEYS.projectMembers(projectId));
+    invalidateCachePattern(CACHE_KEYS.userProjects(userToAdd.id));
+    invalidateCachePattern(CACHE_KEYS.userWorkspaces(userToAdd.id));
+
+    return sendCreated(res, {
       type: 'member',
       member,
       message: `${userToAdd.name} added to project`
@@ -710,6 +747,10 @@ export const updateProjectMemberRole = asyncHandler(async (req, res) => {
     include: { user: true },
   });
 
+  // FOLLO INSTANT: Invalidate project member and user project caches
+  invalidateCache(CACHE_KEYS.projectMembers(projectId));
+  invalidateCachePattern(CACHE_KEYS.userProjects(targetMember.userId));
+
   sendSuccess(res, updatedMember, 'Member role updated');
 });
 
@@ -763,6 +804,10 @@ export const removeProjectMember = asyncHandler(async (req, res) => {
   }
 
   await prisma.projectMember.delete({ where: { id: memberId } });
+
+  // FOLLO INSTANT: Invalidate project member and user project caches
+  invalidateCache(CACHE_KEYS.projectMembers(projectId));
+  invalidateCachePattern(CACHE_KEYS.userProjects(targetMember.userId));
 
   sendNoContent(res);
 });
@@ -818,5 +863,79 @@ export const toggleProjectMember = asyncHandler(async (req, res) => {
     include: { user: true },
   });
 
+  // FOLLO INSTANT: Invalidate project member and user project caches
+  invalidateCache(CACHE_KEYS.projectMembers(projectId));
+  invalidateCachePattern(CACHE_KEYS.userProjects(targetMember.userId));
+
   sendSuccess(res, updatedMember, `Member ${updatedMember.isActive ? 'enabled' : 'disabled'}`);
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PINNED LINKS (FOLLO PROJECT-OVERVIEW)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export const getPinnedLinks = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: {
+      members: { select: { userId: true } },
+      workspace: { include: { members: { select: { userId: true, role: true } } } },
+    },
+  });
+
+  if (!project) throw new NotFoundError('Project not found');
+
+  const isProjectMember = project.members.some(m => m.userId === userId);
+  const isWorkspaceAdmin = project.workspace.members.some(m => m.userId === userId && m.role === 'ADMIN');
+  const isOwner = project.ownerId === userId;
+
+  if (!isProjectMember && !isWorkspaceAdmin && !isOwner) {
+    throw new AuthorizationError('Not authorized to view pinned links');
+  }
+
+  const links = await prisma.projectLink.findMany({
+    where: { projectId },
+    orderBy: { createdAt: 'asc' },
+  });
+  return sendSuccess(res, links);
+});
+
+export const addPinnedLink = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { projectId } = req.params;
+  const { label, url, icon } = req.body;
+  if (!label?.trim() || !url?.trim()) throw new ValidationError('Label and URL are required');
+  const link = await prisma.projectLink.create({
+    data: { projectId, label: label.trim(), url: url.trim(), icon: icon || null, pinnedBy: userId },
+  });
+  return sendCreated(res, link, 'Link added');
+});
+
+export const deletePinnedLink = asyncHandler(async (req, res) => {
+  const { projectId, linkId } = req.params;
+  const { userId } = await req.auth();
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: {
+      members: { select: { userId: true } },
+      workspace: { include: { members: { select: { userId: true, role: true } } } },
+    },
+  });
+
+  if (!project) throw new NotFoundError('Project not found');
+
+  const isProjectMember = project.members.some(m => m.userId === userId);
+  const isWorkspaceAdmin = project.workspace.members.some(m => m.userId === userId && m.role === 'ADMIN');
+  const isOwner = project.ownerId === userId;
+
+  if (!isProjectMember && !isWorkspaceAdmin && !isOwner) {
+    throw new AuthorizationError('Not authorized to delete pinned links');
+  }
+
+  await prisma.projectLink.delete({ where: { id: linkId } });
+  return sendSuccess(res, { deleted: true });
 });

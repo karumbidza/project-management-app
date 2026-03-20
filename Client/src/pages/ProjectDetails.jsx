@@ -1,9 +1,12 @@
+// FOLLO ACCESS-SEC
 // FOLLO PERF
 // FOLLO FIX
 // FOLLO PERMISSIONS
 // FOLLO REALTIME
 // FOLLO PROJECTS-PAGE
 // FOLLO CLEAN-NAV
+// FOLLO PROJECT-OVERVIEW
+// FOLLO ROLE-FLASH
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -16,12 +19,16 @@ import ApplyTemplateDialog from "../components/ApplyTemplateDialog";
 import ProjectCalendar from "../components/ProjectCalendar";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectGantt from "../components/ProjectGantt";
+import ProjectOverview from "../components/project/ProjectOverview"; // FOLLO PROJECT-OVERVIEW
 import useUserRole from "../hooks/useUserRole";
+import NotAuthorised from "../components/NotAuthorised";
+import EmptyState from "../components/EmptyState"; // FOLLO ACCESS-UX
 import { fetchWorkspaces, fetchMyProjects } from "../features/workspaceSlice";
 import { addTaskToProject, updateTaskInProject } from "../features/taskSlice";
 import { io as ioClient } from "socket.io-client";
 
 const TAB_LABELS = {
+    overview: "Overview", // FOLLO PROJECT-OVERVIEW
     tasks: "Tasks",
     gantt: "Gantt",
     calendar: "Calendar",
@@ -31,7 +38,7 @@ const TAB_LABELS = {
 export default function ProjectDetail() {
 
     const [searchParams, setSearchParams] = useSearchParams();
-    const tab = searchParams.get('tab') || 'tasks';
+    const rawTab = searchParams.get('tab') || 'tasks';
     const id = searchParams.get('id');
 
     const navigate = useNavigate();
@@ -39,6 +46,15 @@ export default function ProjectDetail() {
     const { getToken } = useAuth();
     const { user } = useUser();
     const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject } = useUserRole();
+
+    // FOLLO ROLE-FLASH: members must not see Project Overview (management-layer data).
+    // If a member somehow lands on ?tab=overview (e.g. direct URL), silently redirect to tasks.
+    const tab = (isMemberView && rawTab === 'overview') ? 'tasks' : rawTab;
+
+    // FOLLO ROLE-FLASH: tabs available to the current user
+    const visibleTabs = isMemberView
+        ? { tasks: 'Tasks', gantt: 'Gantt', calendar: 'Calendar' }
+        : TAB_LABELS;
     
     const workspaceProjects = useSelector((state) => state?.workspace?.currentWorkspace?.projects || []);
     const myProjects = useSelector((state) => state?.workspace?.myProjects || []);
@@ -107,21 +123,23 @@ export default function ProjectDetail() {
                 </div>
             );
         }
+        // FOLLO ACCESS-SEC / FOLLO ACCESS-UX — State 9: friendly not-found empty state
         return (
-            <div className="p-8 text-center text-zinc-900 dark:text-zinc-200">
-                <p className="text-2xl mt-32 mb-8">Project not found</p>
-                <button onClick={() => navigate('/projects')} className="px-4 py-2 text-sm rounded bg-zinc-200 text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-white dark:hover:bg-zinc-600" >
-                    Back to Projects
-                </button>
-            </div>
+            <EmptyState
+                emoji="🗂️"
+                title="Project not found"
+                description="This project may have been deleted, moved, or you may no longer have access."
+                action={() => navigate('/projects')}
+                actionLabel="Back to Projects"
+            />
         );
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-8 text-zinc-900 dark:text-white">
+        <div className="max-w-6xl mx-auto px-6 py-8 text-zinc-900 dark:text-white">
 
             {/* Minimal header */}
-            <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                     <button className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400" onClick={() => navigate('/projects')}>
                         <ArrowLeftIcon className="w-4 h-4" />
@@ -133,9 +151,6 @@ export default function ProjectDetail() {
                                 {project.status.replace("_", " ")}
                             </span>
                         </div>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                            {TAB_LABELS[tab] || 'Overview'}
-                        </p>
                     </div>
                 </div>
 
@@ -158,12 +173,31 @@ export default function ProjectDetail() {
                 )}
             </div>
 
-            {/* Content — one section at a time, no tabs */}
+            {/* FOLLO PROJECT-OVERVIEW — Tab bar */}
+            {/* FOLLO ROLE-FLASH: visibleTabs excludes Overview for members */}
+            <div className="flex gap-1 mb-6 border-b border-zinc-200 dark:border-zinc-800">
+                {Object.entries(visibleTabs).map(([key, label]) => (
+                    <button
+                        key={key}
+                        onClick={() => setSearchParams({ id, tab: key })}
+                        className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                            tab === key
+                                ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                        }`}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Content */}
             <div>
-                {tab === "tasks" && <ProjectTasks tasks={tasks} projectId={id} />}
-                {tab === "gantt" && <ProjectGantt tasks={tasks} project={project} />}
-                {tab === "calendar" && <ProjectCalendar tasks={tasks} />}
-                {tab === "settings" && <ProjectSettings project={project} />}
+                {tab === "overview"  && <ProjectOverview project={project} />}
+                {tab === "tasks"     && <ProjectTasks tasks={tasks} projectId={id} />}
+                {tab === "gantt"     && <ProjectGantt tasks={tasks} project={project} />}
+                {tab === "calendar"  && <ProjectCalendar tasks={tasks} />}
+                {tab === "settings"  && <ProjectSettings project={project} />}
             </div>
 
             {/* Create Task Modal */}

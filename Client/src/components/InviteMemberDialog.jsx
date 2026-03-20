@@ -1,9 +1,10 @@
 // FOLLO FIX
+// FOLLO ROLE-FIX
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Mail, UserPlus, Building2, FolderOpen, Loader2, ChevronDown } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth, useOrganization } from "@clerk/clerk-react";
-import { addProjectMemberAsync, fetchAllUsersAsync } from "../features/workspaceSlice";
+import { addProjectMemberAsync, addWorkspaceMemberAsync, fetchAllUsersAsync } from "../features/workspaceSlice";
 import toast from "react-hot-toast";
 import LoadingButton from "./ui/LoadingButton";
 
@@ -73,22 +74,26 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
         setIsSubmitting(true);
         try {
             if (inviteType === "workspace") {
-                // Use Clerk's built-in organization invitation system
-                // This sends the email automatically via Clerk
-                if (!organization) {
-                    toast.error("No organization found. Please select a workspace.");
-                    return;
+                // FOLLO ROLE-FIX: Write WorkspaceMember row to DB first (primary path).
+                // Clerk invite is secondary (non-fatal) — sends the notification email only.
+                await dispatch(addWorkspaceMemberAsync({
+                    workspaceId: currentWorkspace.id,
+                    email: formData.email,
+                    role: formData.workspaceRole,
+                    getToken,
+                })).unwrap();
+
+                // Secondary: Clerk invite email (non-fatal — DB write already succeeded)
+                if (organization) {
+                    try {
+                        const clerkRole = formData.workspaceRole === "ADMIN" ? "admin" : "basic_member";
+                        await organization.inviteMember({ emailAddress: formData.email, role: clerkRole });
+                    } catch {
+                        // Clerk invite failed (e.g. user already in org) — DB row exists, that's what matters
+                    }
                 }
-                
-                // Map our roles to Clerk roles: ADMIN -> admin, MEMBER -> basic_member
-                const clerkRole = formData.workspaceRole === "ADMIN" ? "admin" : "basic_member";
-                
-                await organization.inviteMember({
-                    emailAddress: formData.email,
-                    role: clerkRole,
-                });
-                
-                toast.success(`Invitation sent to ${formData.email}! They'll receive an email from Clerk.`);
+
+                toast.success(`${formData.email} added to workspace!`);
             } else {
                 // Add to specific project (contractor) - uses our custom API + Resend
                 const result = await dispatch(addProjectMemberAsync({

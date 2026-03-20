@@ -1,3 +1,4 @@
+// FOLLO AUDIT
 // FOLLO MEMBER-GANTT
 // FOLLO GANTT-FINAL
 // FOLLO GANTT-DONE
@@ -138,7 +139,7 @@ export default function MiniGantt({ tasks }) {
           {columns.map((d, i) => {
             const isToday = d.toDateString() === today.toDateString();
             return (
-              <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: isToday ? 500 : 400, color: isToday ? 'var(--color-text-secondary, #52525b)' : 'var(--color-text-tertiary, #a1a1aa)' }}>
+              <div key={`day-${i}`} style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: isToday ? 500 : 400, color: isToday ? 'var(--color-text-secondary, #52525b)' : 'var(--color-text-tertiary, #a1a1aa)' }}>
                 {d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })}
               </div>
             );

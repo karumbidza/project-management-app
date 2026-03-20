@@ -1,3 +1,4 @@
+// FOLLO ACCESS-SEC
 // FOLLO PERF
 // FOLLO SRP
 // FOLLO WORKFLOW
@@ -44,10 +45,30 @@ export const updateTask = asyncHandler(async (req, res) => {
   sendSuccess(res, result);
 });
 
+// FOLLO ACCESS-SEC
 export const deleteTask = asyncHandler(async (req, res) => {
   const { taskId } = req.params;
   const { userId } = await req.auth();
+
+  // Fetch projectId before deletion for socket emit
+  const taskMeta = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { projectId: true },
+  });
+
   await taskService.deleteTask(taskId, userId);
+
+  // Notify all clients viewing this task or project
+  if (taskMeta) {
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`project:${taskMeta.projectId}`).emit('task_deleted', {
+        taskId,
+        projectId: taskMeta.projectId,
+      });
+    }
+  }
+
   sendNoContent(res);
 });
 

@@ -1,3 +1,4 @@
+// FOLLO ACCESS-SEC
 // FOLLO PERF
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
@@ -14,6 +15,7 @@ const TaskDetails = lazy(() => import("./pages/TaskDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Reports = lazy(() => import("./pages/Reports"));
 const MyTasks = lazy(() => import("./pages/MyTasks"));
+const AccessRevoked = lazy(() => import("./pages/AccessRevoked"));
 
 // Loading spinner for lazy-loaded pages
 const PageLoader = () => (
@@ -27,6 +29,12 @@ const App = () => {
         <>
             <Toaster />
             <Routes>
+                {/* FOLLO ACCESS-SEC — top-level route, outside Layout (no sidebar) */}
+                <Route path="/access-revoked" element={
+                    <Suspense fallback={<PageLoader />}>
+                        <AccessRevoked />
+                    </Suspense>
+                } />
                 <Route path="/" element={<Layout />}>
                     <Route index element={
                         <Suspense fallback={<PageLoader />}>

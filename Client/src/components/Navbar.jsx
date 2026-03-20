@@ -13,8 +13,8 @@ const Navbar = ({ setIsSidebarOpen }) => {
     const { theme } = useSelector(state => state.theme);
 
     return (
-        <div className="w-full bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-6 xl:px-16 py-3 flex-shrink-0 relative z-50">
-            <div className="flex items-center justify-between max-w-6xl mx-auto">
+        <div className="w-full bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-6 xl:px-16 h-[70px] flex items-center flex-shrink-0 relative z-50">
+            <div className="flex items-center justify-between max-w-6xl mx-auto w-full">
                 {/* Left section */}
                 <div className="flex items-center gap-4 min-w-0 flex-1">
                     {/* Sidebar Trigger */}

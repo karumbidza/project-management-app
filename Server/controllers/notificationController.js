@@ -1,3 +1,4 @@
+// FOLLO AUDIT
 // FOLLO PERF
 // FOLLO NOTIFY
 /**
@@ -15,6 +16,7 @@ import prisma from '../configs/prisma.js';
 import {
   asyncHandler,
   NotFoundError,
+  ValidationError,
 } from '../utils/errors.js';
 import {
   sendSuccess,
@@ -128,9 +130,7 @@ export const pushSubscribe = asyncHandler(async (req, res) => {
   const { endpoint, keys } = req.body;
 
   if (!endpoint || !keys?.p256dh || !keys?.auth) {
-    throw new (await import('../utils/errors.js')).ValidationError(
-      'endpoint, keys.p256dh, and keys.auth are required',
-    );
+    throw new ValidationError('endpoint, keys.p256dh, and keys.auth are required');
   }
 
   const subscription = await prisma.pushSubscription.upsert({
@@ -162,7 +162,7 @@ export const pushUnsubscribe = asyncHandler(async (req, res) => {
   const { endpoint } = req.body;
 
   if (!endpoint) {
-    throw new (await import('../utils/errors.js')).ValidationError('endpoint is required');
+    throw new ValidationError('endpoint is required');
   }
 
   await prisma.pushSubscription.deleteMany({

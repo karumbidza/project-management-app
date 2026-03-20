@@ -129,6 +129,7 @@ model User {
     invitationsSent  Invitation[]      @relation("InvitedBy")
     contractorScore ContractorScore?
     pushSubscriptions PushSubscription[]
+    projectComments  ProjectComment[]  // FOLLO PROJECT-OVERVIEW
 
     // Indexes for query performance
     @@index([email])
@@ -200,9 +201,11 @@ model Project {
     // Relations
     owner       User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
     workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-    members     ProjectMember[]
-    tasks       Task[]
-    invitations Invitation[]
+    members         ProjectMember[]
+    tasks           Task[]
+    invitations     Invitation[]
+    projectComments ProjectComment[] // FOLLO PROJECT-OVERVIEW
+    pinnedLinks     ProjectLink[]    // FOLLO PROJECT-OVERVIEW
 
     // Indexes
     @@index([workspaceId])
@@ -585,4 +588,36 @@ model PushSubscription {
     user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
     @@index([userId])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROJECT OVERVIEW MODELS (FOLLO PROJECT-OVERVIEW)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model ProjectComment {
+    id        String   @id @default(cuid())
+    content   String
+    projectId String
+    userId    String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([projectId, createdAt])
+}
+
+model ProjectLink {
+    id        String   @id @default(cuid())
+    projectId String
+    label     String
+    url       String
+    icon      String?
+    pinnedBy  String
+    createdAt DateTime @default(now())
+
+    project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+    @@index([projectId])
 }

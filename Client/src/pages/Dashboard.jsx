@@ -4,6 +4,8 @@
 // FOLLO ACTION-CARDS
 // FOLLO CARD-HISTORY
 // FOLLO GANTT-FINAL
+// FOLLO HEALTH
+// FOLLO ROLE-FLASH
 import { useState, useMemo, useEffect } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { useSelector } from 'react-redux';
@@ -19,9 +21,11 @@ import {
     ChevronRight,
 } from 'lucide-react';
 import CreateProjectDialog from '../components/CreateProjectDialog';
+import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog';
 import GanttWidget from '../components/GanttWidget';
 import SlidePanel from '../components/SlidePanel';
 import ActionPanel from '../components/dashboard/ActionPanel';
+import ProjectHealthCard from '../components/dashboard/ProjectHealthCard'; // FOLLO HEALTH
 import useUserRole from '../hooks/useUserRole';
 
 // ─── Helpers ───────────────────────────────────────
@@ -34,35 +38,7 @@ const safeDate = (d) => {
 };
 
 /** Calculate correct project completion % */
-const calcProgress = (project) => {
-    if (project.progress > 0) return project.progress;
-    const tasks = project.tasks || [];
-    const done = tasks.filter(t => t.status === 'DONE').length;
-    return tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
-};
-
-/** RAG status for a project */
-const ragStatus = (project) => {
-    const tasks = project.tasks || [];
-    const hasBreach = tasks.some(t => t.slaStatus === 'BREACHED');
-    const hasBlocked = tasks.some(t => t.slaStatus === 'BLOCKED');
-    const hasAtRisk = tasks.some(t => t.slaStatus === 'AT_RISK');
-    if (hasBreach || hasBlocked) return 'RED';
-    if (hasAtRisk) return 'AMBER';
-    return 'GREEN';
-};
-
-const ragDot = { GREEN: 'bg-emerald-500', AMBER: 'bg-amber-500', RED: 'bg-red-500' };
-const ragLabel = (project) => {
-    const tasks = project.tasks || [];
-    const breached = tasks.filter(t => t.slaStatus === 'BREACHED').length;
-    const blocked = tasks.filter(t => t.slaStatus === 'BLOCKED').length;
-    const atRisk = tasks.filter(t => t.slaStatus === 'AT_RISK').length;
-    if (breached > 0) return `${breached} breached`;
-    if (blocked > 0) return `${blocked} blocked`;
-    if (atRisk > 0) return `${atRisk} at risk`;
-    return 'On track';
-};
+// FOLLO HEALTH — helpers moved to lib/projectHealth.js + ProjectHealthCard component
 
 // ─── Panel IDs ─────────────────────────────────────
 const PANELS = { APPROVALS: 'approvals', BLOCKERS: 'blockers', BREACHES: 'breaches', EXTENSIONS: 'extensions' };
@@ -86,7 +62,11 @@ const Dashboard = () => {
 
     const { getToken } = useAuth();
     const currentWorkspace = useSelector(s => s.workspace.currentWorkspace);
+    const workspaces = useSelector(s => s.workspace.workspaces);
+    const myProjects = useSelector(s => s.workspace.myProjects);
     const projects = currentWorkspace?.projects || [];
+
+    const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
 
     // ─── Derived data from Redux state ─────────────
     // FOLLO ACTION-CARDS — include projectId + projectName on every task for panel navigation
@@ -165,9 +145,36 @@ const Dashboard = () => {
         [PANELS.EXTENSIONS]: `Extension Requests (${extensionRequests.length})`,
     };
 
-    // FOLLO ACCESS — Non-admins see My Tasks as their home, not admin dashboard
-    if (!isAdmin) {
+    // FOLLO ACCESS / FOLLO ROLE-FLASH — Members always go to My Tasks (their home view).
+    // Previous check used `myProjects.length > 0` which let members with 0 projects
+    // fall through to the admin dashboard. `isMemberView` is the correct gate.
+    if (isMemberView) {
         return <Navigate to="/tasks" replace />;
+    }
+
+    // No workspaces at all — admin who deleted their last workspace, or new user
+    if (workspaces.length === 0) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full text-center gap-6">
+                <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950 flex items-center justify-center">
+                    <Plus className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                    <h2 className="text-xl font-semibold text-zinc-900 dark:text-white mb-2">No workspace yet</h2>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-xs">
+                        Create a workspace to start managing your projects, tasks, and team.
+                    </p>
+                </div>
+                <button
+                    onClick={() => setShowCreateWorkspace(true)}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                    <Plus className="w-4 h-4" />
+                    Create Workspace
+                </button>
+                <CreateWorkspaceDialog isOpen={showCreateWorkspace} onClose={() => setShowCreateWorkspace(false)} />
+            </div>
+        );
     }
 
     return (
@@ -193,7 +200,7 @@ const Dashboard = () => {
             {/* ══════ ROW 1 — ACTION REQUIRED ══════ */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {/* Pending Approvals */}
-                    <button onClick={() => { setActivePanel(PANELS.APPROVALS); setPanelMode('active'); }} className="text-left p-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 hover:border-blue-300 dark:hover:border-blue-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.APPROVALS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 hover:border-blue-300 dark:hover:border-blue-700 transition group">
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
                                 <Clock className="size-5 text-blue-600 dark:text-blue-400" />
@@ -213,10 +220,10 @@ const Dashboard = () => {
                                 {counts.approvalsResolvedThisMonth > 0 ? `${counts.approvalsResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
-                    </button>
+                    </div>
 
                     {/* Active Blockers */}
-                    <button onClick={() => { setActivePanel(PANELS.BLOCKERS); setPanelMode('active'); }} className="text-left p-4 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 hover:border-orange-300 dark:hover:border-orange-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.BLOCKERS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 hover:border-orange-300 dark:hover:border-orange-700 transition group">
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/40">
                                 <ShieldAlert className="size-5 text-orange-600 dark:text-orange-400" />
@@ -236,10 +243,10 @@ const Dashboard = () => {
                                 {counts.blockersResolvedThisMonth > 0 ? `${counts.blockersResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
-                    </button>
+                    </div>
 
                     {/* SLA Breaches */}
-                    <button onClick={() => { setActivePanel(PANELS.BREACHES); setPanelMode('active'); }} className="text-left p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 hover:border-red-300 dark:hover:border-red-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.BREACHES); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 hover:border-red-300 dark:hover:border-red-700 transition group">
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/40">
                                 <AlertTriangle className="size-5 text-red-600 dark:text-red-400" />
@@ -259,10 +266,10 @@ const Dashboard = () => {
                                 {counts.breachesResolvedThisMonth > 0 ? `${counts.breachesResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
-                    </button>
+                    </div>
 
                     {/* Extension Requests */}
-                    <button onClick={() => { setActivePanel(PANELS.EXTENSIONS); setPanelMode('active'); }} className="text-left p-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 hover:border-amber-300 dark:hover:border-amber-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.EXTENSIONS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 hover:border-amber-300 dark:hover:border-amber-700 transition group">
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/40">
                                 <CalendarClock className="size-5 text-amber-600 dark:text-amber-400" />
@@ -282,50 +289,35 @@ const Dashboard = () => {
                                 {counts.extensionsResolvedThisMonth > 0 ? `${counts.extensionsResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
-                    </button>
+                    </div>
                 </div>
 
             {/* ══════ ROW 2 — TIMELINE (full width, main item) ══════ */}
             <GanttWidget />
 
-            {/* ══════ ROW 3 — PROJECT HEALTH ══════ */}
-            <div className="bg-white dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-                <div className="p-4 border-b border-zinc-200 dark:border-zinc-800">
-                    <h2 className="font-medium text-zinc-900 dark:text-white">Project Health</h2>
-                </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-0 divide-y sm:divide-y-0 sm:divide-x divide-zinc-100 dark:divide-zinc-800">
+            {/* ══════ ROW 3 — PROJECT HEALTH (FOLLO HEALTH) ══════ */}
+            {/* FOLLO ROLE-FLASH: Project Health is management data — admins only */}
+            {isAdmin && (
+                <div>
+                    <h2 className="font-medium text-zinc-900 dark:text-white mb-3">Project Health</h2>
                     {projects.length === 0 ? (
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400 text-center py-8 col-span-full">No projects yet</p>
-                    ) : projects.map(project => {
-                        const pct = calcProgress(project);
-                        const tasks = project.tasks || [];
-                        const done = tasks.filter(t => t.status === 'DONE').length;
-                        const rag = ragStatus(project);
-                        return (
-                            <button
-                                key={project.id}
-                                onClick={() => navigate(`/projectsDetail?id=${project.id}&tab=tasks`)}
-                                className="w-full text-left p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition"
-                            >
-                                <div className="flex items-center gap-2 mb-2">
-                                    <div className={`w-2.5 h-2.5 rounded-full ${ragDot[rag]}`} />
-                                    <span className="font-medium text-sm text-zinc-900 dark:text-white truncate">{project.name}</span>
-                                </div>
-                                <div className="flex items-center gap-3 mb-1.5">
-                                    <div className="flex-1 h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-full">
-                                        <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                                    </div>
-                                    <span className="text-xs text-zinc-500 dark:text-zinc-400 w-9 text-right">{pct}%</span>
-                                </div>
-                                <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
-                                    <span>{done}/{tasks.length} tasks</span>
-                                    <span>{ragLabel(project)}</span>
-                                </div>
-                            </button>
-                        );
-                    })}
+                        <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: 'var(--color-text-tertiary, #a1a1aa)', background: 'var(--color-background-secondary, #f4f4f5)', borderRadius: 12 }}>
+                            No projects yet. Create your first project to see health status.
+                        </div>
+                    ) : (
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: `repeat(${Math.min(projects.length, 3)}, minmax(0, 1fr))`,
+                            gap: 10,
+                            alignItems: 'stretch',
+                        }}>
+                            {projects.map(project => (
+                                <ProjectHealthCard key={project.id} project={project} />
+                            ))}
+                        </div>
+                    )}
                 </div>
-            </div>
+            )}
 
 
 

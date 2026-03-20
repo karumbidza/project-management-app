@@ -1,3 +1,5 @@
+// FOLLO ACCESS-SEC
+// FOLLO AUDIT
 // FOLLO PERF
 // FOLLO SRP
 // FOLLO WORKFLOW
@@ -8,7 +10,7 @@ import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
 import { useSelector, useDispatch } from "react-redux";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useUser, useAuth } from "@clerk/clerk-react";
 import { io as ioClient } from "socket.io-client";
 import { updateTaskAsync } from "../features/taskSlice";
@@ -33,6 +35,7 @@ import TaskActionPanel from "../components/task/TaskActionPanel";
 import TaskCommentPanel from "../components/task/TaskCommentPanel";
 import ProjectInfoCard from "../components/task/ProjectInfoCard";
 import TaskDependencies from "../components/TaskDependencies"; // FOLLO DEPS
+import NotAuthorised from "../components/NotAuthorised";
 
 const COMMENT_POLL_INTERVAL = 10000; // 10 seconds
 
@@ -54,6 +57,7 @@ const TaskDetails = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const projectId = searchParams.get("projectId");
     const taskId = searchParams.get("taskId");
+    const navigate = useNavigate();
 
     const { user } = useUser();
     const { getToken } = useAuth();
@@ -63,6 +67,8 @@ const TaskDetails = () => {
     const [task, setTask] = useState(null);
     const [project, setProject] = useState(null);
     const [newComment, setNewComment] = useState("");
+    // FOLLO ACCESS-SEC
+    const [accessError, setAccessError] = useState(null); // 'not_found' | 'forbidden' | null
     const [loading, setLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     // FOLLO DEPS — project tasks for dependency picker
@@ -158,6 +164,18 @@ const TaskDetails = () => {
             });
 
             const result = await response.json();
+
+            // FOLLO ACCESS-SEC — handle access errors gracefully
+            if (response.status === 404) {
+                setAccessError('not_found');
+                if (!silent) setLoading(false);
+                return;
+            }
+            if (response.status === 403) {
+                setAccessError('forbidden');
+                if (!silent) setLoading(false);
+                return;
+            }
 
             if (response.ok && result.success && result.data) {
                 if (silent) {
@@ -637,7 +655,7 @@ const TaskDetails = () => {
             fetchTaskDetails({ silent: true });
         }, COMMENT_POLL_INTERVAL);
         return () => clearInterval(interval);
-    }, [taskId]); // eslint-disable-line react-hooks-exhaustive-deps
+    }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // FOLLO TASK-UI — Real-time Socket.IO listener for task updates
     useEffect(() => {
@@ -658,9 +676,20 @@ const TaskDetails = () => {
                 .catch(() => {});
         });
 
+        // FOLLO ACCESS-SEC
+        socket.on('task_deleted', ({ taskId: deletedId }) => {
+            if (deletedId === taskId) {
+                import('react-hot-toast').then(({ default: toast }) => {
+                    toast('This task has been deleted.', { icon: 'ℹ️' });
+                });
+                navigate('/tasks', { replace: true });
+            }
+        });
+
         return () => {
             socket.emit('leave_project', projectId);
             socket.off('task_updated');
+            socket.off('task_deleted');
             socket.disconnect();
         };
     }, [projectId, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -716,7 +745,20 @@ const TaskDetails = () => {
             <div className="h-24 bg-gray-200 dark:bg-zinc-700 rounded" />
         </div>
     );
-    if (!task) return <div className="text-red-500 px-4 py-6">Task not found.</div>;
+
+    // FOLLO ACCESS-SEC
+    if (accessError === 'forbidden') return <NotAuthorised message="You don't have access to this task." />;
+    if (accessError === 'not_found' || !task) return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 40px', textAlign: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '32px' }}>🗂️</div>
+            <div style={{ fontSize: '16px', fontWeight: 500, color: 'var(--color-text-primary, #18181b)' }}>Task not found</div>
+            <div style={{ fontSize: '13px', color: 'var(--color-text-secondary, #52525b)' }}>This task may have been deleted or you don't have access.</div>
+            <button onClick={() => navigate(-1)} style={{ marginTop: '8px', padding: '8px 20px', fontSize: '13px', border: '0.5px solid #d4d4d8', borderRadius: '8px', background: 'none', color: '#52525b', cursor: 'pointer' }}>Go back</button>
+        </div>
+    );
+
+    // FOLLO ACCESS-SEC
+    const isReadOnly = project?.status === 'COMPLETED' || project?.status === 'CANCELLED';
 
     // FOLLO WORKFLOW — Start task handler (passed to TaskActionPanel)
     const handleStartTask = async () => {
@@ -734,7 +776,34 @@ const TaskDetails = () => {
     };
 
     return (
-        <div className="flex flex-col-reverse lg:flex-row gap-6 sm:p-4 text-gray-900 dark:text-zinc-100 max-w-6xl mx-auto">
+        <div className="flex flex-col gap-4 max-w-6xl mx-auto">
+            {/* FOLLO ACCESS-UX — State 10: viewing task not assigned to current user */}
+            {task.assigneeId && task.assigneeId !== user?.id && !canApproveReject && (
+                <div style={{
+                    padding: '10px 16px',
+                    background: 'var(--color-background-secondary, #f4f4f5)',
+                    border: '0.5px solid #d4d4d8',
+                    borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px',
+                    color: 'var(--color-text-secondary, #52525b)',
+                }}>
+                    <span>ℹ️</span>
+                    <span>This task is assigned to <strong>{task.assignee?.name || 'another team member'}</strong>. You are viewing in read-only mode.</span>
+                </div>
+            )}
+            {/* FOLLO ACCESS-SEC — read-only banner for completed/cancelled projects */}
+            {isReadOnly && (
+                <div style={{
+                    padding: '10px 16px', marginBottom: '12px',
+                    background: project.status === 'COMPLETED' ? '#f0fdf4' : '#f4f4f5',
+                    border: `0.5px solid ${project.status === 'COMPLETED' ? '#bbf7d0' : '#d4d4d8'}`,
+                    borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px',
+                    color: 'var(--color-text-secondary, #52525b)',
+                }}>
+                    <span>{project.status === 'COMPLETED' ? '✅' : '📁'}</span>
+                    <span>This project is {project.status.toLowerCase()}. All data is read-only.</span>
+                </div>
+            )}
+            <div className="flex flex-col-reverse lg:flex-row gap-6 sm:p-4 text-gray-900 dark:text-zinc-100">
             {/* Left: Comments / Chatbox */}
             <div className="w-full lg:w-2/3">
                 <TaskCommentPanel
@@ -775,6 +844,7 @@ const TaskDetails = () => {
                         onDepsChanged={handleDepsChanged}
                     />
                 </div>
+                {!isReadOnly && (
                 <TaskActionPanel
                     task={task}
                     user={user}
@@ -820,7 +890,9 @@ const TaskDetails = () => {
                     showDenyExtensionForm={showDenyExtensionForm} setShowDenyExtensionForm={setShowDenyExtensionForm}
                     denyExtensionReason={denyExtensionReason} setDenyExtensionReason={setDenyExtensionReason}
                 />
+                )}
                 <ProjectInfoCard project={project} task={task} userId={user?.id} />
+            </div>
             </div>
         </div>
     );

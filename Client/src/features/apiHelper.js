@@ -1,3 +1,4 @@
+// FOLLO ACCESS-SEC
 // FOLLO SRP
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 export const API_V1 = `${API_URL}/api/v1`;
@@ -22,7 +23,13 @@ export const apiCall = async (url, options, getToken) => {
     }
     
     const result = await response.json();
-    
+
+    // FOLLO ACCESS-SEC — handle workspace access revoked globally
+    if (response.status === 403 && result?.error?.code === 'workspace_access_revoked') {
+      window.location.href = '/access-revoked';
+      throw new Error('workspace_access_revoked');
+    }
+
     // Handle new envelope format
     if (result.hasOwnProperty('success')) {
         if (!result.success) {

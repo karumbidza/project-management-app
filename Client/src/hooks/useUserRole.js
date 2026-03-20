@@ -1,4 +1,6 @@
 // FOLLO AUTH-FIX
+// FOLLO ROLE-FIX
+// FOLLO ROLE-FLASH
 import { useSelector } from 'react-redux';
 import { useUser, useAuth } from '@clerk/clerk-react';
 
@@ -17,7 +19,7 @@ import { useUser, useAuth } from '@clerk/clerk-react';
 export function useUserRole() {
     const { user } = useUser();
     const { userId: liveUserId, isLoaded } = useAuth();
-    const { currentWorkspace, workspaces, myProjects, currentProject, isMemberView, loadingStates } = useSelector((state) => state.workspace);
+    const { currentWorkspace, workspaces, myProjects, currentProject, isMemberView, loadingStates, roleConfirmed } = useSelector((state) => state.workspace);
     
     // FOLLO AUTH-FIX: Always use liveUserId from useAuth() — this is the
     // canonical Clerk session ID, not a cached value from a previous session.
@@ -26,18 +28,26 @@ export function useUserRole() {
     
     // Check if user is in member-only view
     // True if: (a) isMemberView flag is set, (b) no workspaces at all, OR (c) user is not ADMIN/OWNER in any workspace
-    const workspacesLoaded = !loadingStates?.workspaces;
-    
-    const isAdminInAnyWorkspace = workspacesLoaded && workspaces?.some(ws => {
+    // FOLLO ROLE-FLASH: Use roleConfirmed (not workspacesLoaded) so focus-triggered re-fetches
+    // don't temporarily flip loadingStates.workspaces=true and reset role to unknown.
+    // roleConfirmed stays true during re-fetches; only clears on user switch.
+    const isAdminInAnyWorkspace = roleConfirmed && workspaces?.some(ws => {
         if (ws.ownerId === userId) return true;
         return ws.members?.some(m =>
             (m.userId === userId || m.user?.id === userId) && m.role === 'ADMIN'
         );
     });
-    
-    // Member view: anyone who isn't admin in any workspace
-    // Even users with no workspaces/projects are members if they're not admin
-    const isProjectMemberOnly = isMemberView || (workspacesLoaded && !isAdminInAnyWorkspace);
+
+    // FOLLO ROLE-FIX: Member determination comes from WorkspaceMember.role, NOT project count.
+    // A user is a member if they have MEMBER role in any workspace regardless of project count.
+    // New users with 0 memberships → isProjectMemberOnly=false → onboarding/admin state (correct).
+    // Admin who deleted last workspace → 0 memberships → isProjectMemberOnly=false → admin state (correct).
+    const isMemberInAnyWorkspace = roleConfirmed && (workspaces?.some(ws =>
+        ws.members?.some(m =>
+            (m.userId === userId || m.user?.id === userId) && m.role === 'MEMBER'
+        )
+    ) ?? false);
+    const isProjectMemberOnly = isMemberView || (roleConfirmed && isMemberInAnyWorkspace && !isAdminInAnyWorkspace);
     
     // FOLLO AUTH-FIX: Match by userId first, fall back to email
     const workspaceMembership = currentWorkspace?.members?.find(
@@ -92,6 +102,7 @@ export function useUserRole() {
         userId,
         userEmail,
         isLoaded: isLoaded && !!userId,
+        roleConfirmed,  // FOLLO ROLE-FLASH: true after first workspace fetch resolves
         
         // View mode
         isProjectMemberOnly,

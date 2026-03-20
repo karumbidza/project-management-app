@@ -4,6 +4,7 @@
 // FOLLO ACCESS
 // FOLLO MEMBER-GANTT
 // FOLLO AUTOSTART
+// FOLLO ACCESS-UX
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { useUser, useAuth } from '@clerk/clerk-react'
@@ -73,6 +74,9 @@ const MyTasks = () => {
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [priorityFilter, setPriorityFilter] = useState('ALL')
     const [actionLoading, setActionLoading] = useState(null)
+    // FOLLO ACCESS-UX — State 5 (show completed) + State 17 (project filter)
+    const [showCompleted, setShowCompleted] = useState(false)
+    const [projectFilter, setProjectFilter] = useState('ALL')
 
     // Inject gantt animations once
     useEffect(() => {
@@ -111,19 +115,32 @@ const MyTasks = () => {
         }
     }, [allTasks])
 
-    // Filter tasks
+    // FOLLO ACCESS-UX — State 17: unique projects from allTasks for project tabs
+    const taskProjects = useMemo(() => {
+        const map = {}
+        allTasks.forEach(t => {
+            if (t.projectId && t.projectName) map[t.projectId] = t.projectName
+        })
+        return Object.entries(map).map(([id, name]) => ({ id, name }))
+    }, [allTasks])
+
+    // FOLLO ACCESS-UX — State 5: completed count + all-active-done flag
+    const completedCount = useMemo(() => allTasks.filter(t => t.status === 'DONE').length, [allTasks])
+    const allActiveDone = allTasks.length > 0 && completedCount === allTasks.length
+
+    // Filter tasks — FOLLO ACCESS-UX: also filter by project and showCompleted
     const filteredTasks = useMemo(() => {
         return allTasks.filter(task => {
-            const matchesSearch = !searchTerm || 
+            if (!showCompleted && task.status === 'DONE') return false
+            if (projectFilter !== 'ALL' && task.projectId !== projectFilter) return false
+            const matchesSearch = !searchTerm ||
                 task.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 task.description?.toLowerCase().includes(searchTerm.toLowerCase())
-            
             const matchesStatus = statusFilter === 'ALL' || task.status === statusFilter
             const matchesPriority = priorityFilter === 'ALL' || task.priority === priorityFilter
-            
             return matchesSearch && matchesStatus && matchesPriority
         })
-    }, [allTasks, searchTerm, statusFilter, priorityFilter])
+    }, [allTasks, searchTerm, statusFilter, priorityFilter, projectFilter, showCompleted])
 
     // FOLLO ACCESS: Sort by urgency — overdue first, then blocked, active, todo, done
     const sortedTasks = useMemo(() => {
@@ -314,6 +331,25 @@ const MyTasks = () => {
                 </p>
             </div>
 
+            {/* FOLLO ACCESS-UX — State 17: Project filter tabs (only when multiple projects) */}
+            {taskProjects.length > 1 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                    {[{ id: 'ALL', name: 'All Projects' }, ...taskProjects].map(proj => (
+                        <button
+                            key={proj.id}
+                            onClick={() => setProjectFilter(proj.id)}
+                            className={`px-3 py-1 text-xs rounded-full border transition ${
+                                projectFilter === proj.id
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-400 dark:hover:border-zinc-500'
+                            }`}
+                        >
+                            {proj.name}
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {/* Filters — compact dropdown bar */}
             <div className="flex items-center gap-3 flex-wrap">
                 {/* Search */}
@@ -357,12 +393,26 @@ const MyTasks = () => {
                 </div>
 
                 {/* Active filter indicators */}
-                {(statusFilter !== 'ALL' || priorityFilter !== 'ALL') && (
+                {(statusFilter !== 'ALL' || priorityFilter !== 'ALL' || projectFilter !== 'ALL' || searchTerm) && (
                     <button
-                        onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); }}
+                        onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); setProjectFilter('ALL'); setSearchTerm(''); }}
                         className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                     >
                         Clear filters
+                    </button>
+                )}
+
+                {/* FOLLO ACCESS-UX — State 5: show completed toggle */}
+                {completedCount > 0 && (
+                    <button
+                        onClick={() => setShowCompleted(prev => !prev)}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                            showCompleted
+                                ? 'bg-zinc-100 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300'
+                                : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-400'
+                        }`}
+                    >
+                        {showCompleted ? 'Hide' : 'Show'} completed ({completedCount})
                     </button>
                 )}
 
@@ -374,6 +424,21 @@ const MyTasks = () => {
                 </p>
             </div>
 
+            {/* FOLLO ACCESS-UX — State 5: All done banner */}
+            {allActiveDone && !showCompleted && (
+                <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-5 text-center">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
+                    <p className="font-medium text-emerald-700 dark:text-emerald-400">All caught up!</p>
+                    <p className="text-sm text-emerald-600 dark:text-emerald-500 mt-1">All your tasks are complete. Great work.</p>
+                    <button
+                        onClick={() => setShowCompleted(true)}
+                        className="mt-3 text-xs text-emerald-700 dark:text-emerald-400 underline hover:no-underline"
+                    >
+                        Show completed tasks ({completedCount})
+                    </button>
+                </div>
+            )}
+
             {/* FOLLO MEMBER-GANTT: Mini Gantt timeline */}
             <MiniGantt tasks={allTasks} />
 
@@ -381,13 +446,38 @@ const MyTasks = () => {
             <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
                 {sortedTasks.length === 0 ? (
                     <div className="p-12 text-center">
-                        <CheckSquareIcon className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-zinc-600" />
-                        <p className="text-gray-500 dark:text-zinc-400">No tasks found</p>
-                        <p className="text-sm text-gray-400 dark:text-zinc-500 mt-1">
-                            {allTasks.length === 0 
-                                ? "You don't have any tasks assigned yet" 
-                                : "Try adjusting your filters"}
-                        </p>
+                        {/* FOLLO ACCESS-UX — State 14: new member onboarding */}
+                        {isMemberView && (!myProjects || myProjects.length === 0) ? (
+                            <>
+                                <div className="text-4xl mb-4">👋</div>
+                                <p className="font-medium text-gray-700 dark:text-zinc-300 mb-2">Welcome to your workspace!</p>
+                                <p className="text-sm text-gray-400 dark:text-zinc-500 max-w-xs mx-auto leading-relaxed">
+                                    You haven't been added to any projects yet. Ask your workspace admin to assign you to a project to get started.
+                                </p>
+                            </>
+                        ) : allTasks.length === 0 ? (
+                            /* FOLLO ACCESS-UX — State 2: has projects but no tasks assigned */
+                            <>
+                                <CheckSquareIcon className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-zinc-600" />
+                                <p className="font-medium text-gray-700 dark:text-zinc-300 mb-1">No tasks assigned yet</p>
+                                <p className="text-sm text-gray-400 dark:text-zinc-500">
+                                    Tasks assigned to you will appear here.
+                                </p>
+                            </>
+                        ) : (
+                            /* Filters active but no match */
+                            <>
+                                <Search className="w-10 h-10 mx-auto mb-4 text-gray-300 dark:text-zinc-600" />
+                                <p className="font-medium text-gray-700 dark:text-zinc-300 mb-1">No matching tasks</p>
+                                <p className="text-sm text-gray-400 dark:text-zinc-500">Try adjusting your filters</p>
+                                <button
+                                    onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); setProjectFilter('ALL'); setSearchTerm(''); }}
+                                    className="mt-3 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                >
+                                    Clear all filters
+                                </button>
+                            </>
+                        )}
                     </div>
                 ) : (
                     <div className="divide-y divide-gray-200 dark:divide-zinc-700">

@@ -1,8 +1,11 @@
+// FOLLO ACCESS-SEC
+// FOLLO AUDIT
 // FOLLO AUTH-FIX
 // FOLLO PERF
 // FOLLO ACTION-CARDS
 // FOLLO CARD-HISTORY
 // FOLLO GANTT-FINAL
+// FOLLO INSTANT
 /**
  * Workspace Controller
  * Handles workspace CRUD and member management
@@ -158,6 +161,9 @@ export const syncWorkspace = asyncHandler(async (req, res) => {
     },
   });
 
+  // Invalidate cache so the next GET /workspaces returns the new workspace
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(ownerId || userId));
+
   sendCreated(res, workspace, 'Workspace synced successfully');
 });
 
@@ -171,7 +177,7 @@ export const getUserWorkspaces = asyncHandler(async (req, res) => {
 
   // FOLLO AUTH-FIX: Guard against stale/missing userId from Clerk session
   if (!userId) {
-    return res.status(401).json({ success: false, error: { message: 'Not authenticated' } });
+    throw new AuthorizationError('Not authenticated');
   }
 
   // Use cache for workspace list (2 min TTL)
@@ -312,6 +318,10 @@ export const addMemberToWorkspace = asyncHandler(async (req, res) => {
     role: role || WORKSPACE_ROLES.MEMBER,
   }).catch(err => console.error('[Email] Failed to send workspace invite:', err));
 
+  // FOLLO INSTANT: Invalidate workspace and project caches for the newly added member
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(userToAdd.id));
+  invalidateCachePattern(CACHE_KEYS.userProjects(userToAdd.id));
+
   sendCreated(res, member, 'Member added to workspace successfully');
 });
 
@@ -324,10 +334,13 @@ export const deleteWorkspace = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();
   const { workspaceId } = req.params;
 
-  // Find workspace
+  // Find workspace and all its members (for cache invalidation)
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
-    include: { projects: { select: { id: true } } },
+    include: {
+      projects: { select: { id: true } },
+      members: { select: { userId: true } },
+    },
   });
 
   if (!workspace) {
@@ -342,10 +355,19 @@ export const deleteWorkspace = asyncHandler(async (req, res) => {
     );
   }
 
+  // Collect all member userIds before deletion (for cache busting)
+  const memberIds = workspace.members.map(m => m.userId);
+
   // Delete workspace (cascades to members, projects, tasks via Prisma schema)
   await prisma.workspace.delete({
     where: { id: workspaceId },
   });
+
+  // Invalidate workspace + project cache for every member so stale data can't be served
+  for (const memberId of memberIds) {
+    invalidateCachePattern(CACHE_KEYS.userWorkspaces(memberId));
+    invalidateCachePattern(CACHE_KEYS.userProjects(memberId));
+  }
 
   sendSuccess(res, { id: workspaceId }, 'Workspace deleted successfully');
 });
@@ -428,7 +450,7 @@ export const getDashboardStats = asyncHandler(async (req, res) => {
   ] = await Promise.all([
     prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['APPROVED', 'REJECTED'] } } }),
     prisma.slaEvent.count({ where: { ...baseWhere, type: 'BLOCKER_RESOLVED' } }),
-    prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['APPROVED', 'BREACHED'] } } }),
+    prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['BREACHED'] } } }),
     prisma.slaEvent.count({ where: { ...baseWhere, type: { in: ['EXTENSION_APPROVED', 'EXTENSION_DENIED'] } } }),
   ]);
 
@@ -493,4 +515,24 @@ export const getDashboardHistory = asyncHandler(async (req, res) => {
   });
 
   return sendSuccess(res, events);
+});
+
+// FOLLO ACCESS-SEC — GET /api/v1/workspaces/:workspaceId/my-role
+export const getMyRole = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId } = req.params;
+
+  const member = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, userId },
+    select: { role: true },
+  });
+
+  if (!member) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'workspace_access_revoked', message: 'You no longer have access to this workspace.' },
+    });
+  }
+
+  sendSuccess(res, { role: member.role });
 });

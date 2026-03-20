@@ -5,8 +5,8 @@ import { NavLink, useNavigate, useLocation, useSearchParams } from 'react-router
 import { useSelector, useDispatch } from 'react-redux'
 import { setCurrentProject } from '../features/workspaceSlice'
 import MyTasksSidebar from './MyTasksSidebar'
-import { 
-    FolderOpenIcon, 
+import {
+    FolderOpenIcon,
     CheckSquareIcon,
     GanttChart,
     ChevronRightIcon,
@@ -15,6 +15,9 @@ import {
     CalendarIcon
 } from 'lucide-react'
 import { useUser } from '@clerk/clerk-react'
+
+// FOLLO CLEAN-NAV: Projects page is admin-only. Members navigate projects
+// through the "My Projects" expandable tree below, not via a top-level nav item.
 
 const getProjectSubItems = (projectId) => [
     { title: 'Tasks', icon: KanbanIcon, tab: 'tasks' },
@@ -32,10 +35,10 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
     const sidebarRef = useRef(null);
     const [expandedProjects, setExpandedProjects] = useState(new Set());
 
-    // FOLLO ACCESS: My Tasks is the member's primary/home view
+    // FOLLO ACCESS: My Tasks is the member's primary/home view.
+    // Projects nav is intentionally excluded — it's an admin-only page.
     const menuItems = [
         { name: 'My Tasks', href: '/tasks', icon: CheckSquareIcon },
-        { name: 'Projects', href: '/projects', icon: FolderOpenIcon },
     ];
 
     useEffect(() => {
@@ -60,7 +63,7 @@ const MemberSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
             className={`z-10 bg-white dark:bg-zinc-900 min-w-68 flex flex-col h-screen border-r border-gray-200 dark:border-zinc-800 max-sm:absolute transition-all ${isSidebarOpen ? 'left-0' : '-left-full'}`}
         >
             {/* Member Profile Header */}
-            <div className="p-4 border-b border-gray-200 dark:border-zinc-800">
+            <div className="px-4 h-[70px] flex items-center border-b border-gray-200 dark:border-zinc-800">
                 <div className="flex items-center gap-3">
                     {user?.imageUrl ? (
                         <img 

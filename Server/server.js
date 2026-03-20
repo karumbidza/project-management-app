@@ -1,3 +1,4 @@
+// FOLLO AUDIT
 // FOLLO SLA
 // FOLLO PERF
 // FOLLO PERF-2
@@ -63,6 +64,8 @@ export const io = new SocketServer(httpServer, {
     credentials: true,
   },
 });
+
+app.set('io', io); // FOLLO PROJECT-OVERVIEW — make io available to controllers
 
 io.on('connection', (socket) => {
   // Project-level rooms — join when user opens a project
@@ -257,6 +260,7 @@ app.use('/api/v1/templates',     protect, templateRouter); // FOLLO SLA Phase 7
 app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
 app.use('/api/v1/media',         protect, mediaRouter);
 
+// FOLLO AUDIT — Legacy unversioned routes kept for backwards compat; prefer /api/v1/
 // Legacy routes (for backward compatibility - will be deprecated)
 app.use('/api/workspaces', protect, workspaceRouter);
 app.use('/api/projects',   protect, projectRouter);

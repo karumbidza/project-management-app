@@ -5,7 +5,8 @@ import { useSelector, useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
 import { Building2, Trash2, Loader2, Moon, Sun, Plus, ChevronDown, ChevronUp, Pencil, X, FileStack, FolderCog, GripVertical } from "lucide-react";
 import LoadingButton from "../components/ui/LoadingButton";
-import { deleteWorkspaceAsync } from "../features/workspaceSlice";
+import { deleteWorkspaceAsync, deleteProjectAsync } from "../features/workspaceSlice";
+import { deleteTaskAsync } from "../features/taskSlice";
 import { toggleTheme } from "../features/themeSlice";
 import { useNavigate, Navigate } from "react-router-dom";
 import useUserRole from "../hooks/useUserRole";
@@ -238,8 +239,25 @@ export default function Settings() {
     const navigate = useNavigate();
     const { getToken, userId } = useAuth();
 
+    // ━━━ Delete workspace ━━━
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     const [confirmText, setConfirmText] = useState("");
+
+    // ━━━ Delete project ━━━
+    const [selectedProjectId, setSelectedProjectId] = useState("");
+    const [confirmProjectName, setConfirmProjectName] = useState("");
+    const [isDeletingProject, setIsDeletingProject] = useState(false);
+
+    // ━━━ Delete task ━━━
+    const [taskProjectId, setTaskProjectId] = useState("");
+    const [selectedTaskId, setSelectedTaskId] = useState("");
+    const [confirmTaskTitle, setConfirmTaskTitle] = useState("");
+    const [isDeletingTask, setIsDeletingTask] = useState(false);
+
+    const projects = currentWorkspace?.projects || [];
+    const tasksForSelectedProject = projects.find(p => p.id === taskProjectId)?.tasks || [];
+    const selectedProject = projects.find(p => p.id === selectedProjectId);
+    const selectedTask = tasksForSelectedProject.find(t => t.id === selectedTaskId);
 
     // ━━━ Template state ━━━
     const [taskTemplates, setTaskTemplates] = useState([]);
@@ -313,15 +331,61 @@ export default function Settings() {
         }
 
         try {
-            await dispatch(deleteWorkspaceAsync({ 
-                workspaceId: currentWorkspace.id, 
-                getToken 
+            await dispatch(deleteWorkspaceAsync({
+                workspaceId: currentWorkspace.id,
+                getToken,
             })).unwrap();
             toast.success("Workspace deleted");
             setDeleteConfirm(false);
+            setConfirmText("");
             navigate("/");
         } catch (error) {
             toast.error(error || "Failed to delete workspace");
+        }
+    };
+
+    const handleDeleteProject = async () => {
+        if (!selectedProject || confirmProjectName !== selectedProject.name) {
+            toast.error("Project name doesn't match");
+            return;
+        }
+        setIsDeletingProject(true);
+        try {
+            await dispatch(deleteProjectAsync({
+                projectId: selectedProject.id,
+                workspaceId: currentWorkspace.id,
+                getToken,
+            })).unwrap();
+            toast.success(`Project "${selectedProject.name}" deleted`);
+            setSelectedProjectId("");
+            setConfirmProjectName("");
+        } catch (err) {
+            toast.error(err || "Failed to delete project");
+        } finally {
+            setIsDeletingProject(false);
+        }
+    };
+
+    const handleDeleteTask = async () => {
+        if (!selectedTask || confirmTaskTitle !== selectedTask.title) {
+            toast.error("Task title doesn't match");
+            return;
+        }
+        setIsDeletingTask(true);
+        try {
+            await dispatch(deleteTaskAsync({
+                taskId: selectedTask.id,
+                projectId: taskProjectId,
+                getToken,
+            })).unwrap();
+            toast.success(`Task "${selectedTask.title}" deleted`);
+            setTaskProjectId("");
+            setSelectedTaskId("");
+            setConfirmTaskTitle("");
+        } catch (err) {
+            toast.error(err || "Failed to delete task");
+        } finally {
+            setIsDeletingTask(false);
         }
     };
 
@@ -533,71 +597,140 @@ export default function Settings() {
                 )}
             </div>
 
-            {/* Danger Zone - Only for owners */}
-            {isOwner && (
-                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-red-200 dark:border-red-900/50 p-6">
-                    <h2 className="text-lg font-medium text-red-600 dark:text-red-400 mb-4">
-                        Danger Zone
-                    </h2>
-                    
-                    {!deleteConfirm ? (
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="font-medium text-gray-900 dark:text-white">
-                                    Delete Workspace
-                                </p>
-                                <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                    Permanently delete this workspace and all its data
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => setDeleteConfirm(true)}
-                                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm"
-                            >
-                                Delete Workspace
-                            </button>
+            {/* Danger Zone - admins can delete projects/tasks; only owners can delete workspace */}
+            {isAdmin && (
+                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-red-200 dark:border-red-900/50 p-6 space-y-6">
+                    <h2 className="text-lg font-medium text-red-600 dark:text-red-400">Danger Zone</h2>
+
+                    {/* ── Delete Project ── */}
+                    <div className="space-y-3 pb-6 border-b border-zinc-100 dark:border-zinc-800">
+                        <div>
+                            <p className="font-medium text-gray-900 dark:text-white">Delete Project</p>
+                            <p className="text-sm text-gray-500 dark:text-zinc-400">Permanently delete a project and all its tasks. This cannot be undone.</p>
                         </div>
-                    ) : (
-                        <div className="space-y-4">
-                            <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                                <p className="text-sm text-red-600 dark:text-red-400">
-                                    This action cannot be undone. This will permanently delete the 
-                                    <strong> {currentWorkspace.name}</strong> workspace, all projects, 
-                                    tasks, and member associations.
-                                </p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-1">
-                                    Type <strong>{currentWorkspace.name}</strong> to confirm
-                                </label>
+                        <select
+                            value={selectedProjectId}
+                            onChange={(e) => { setSelectedProjectId(e.target.value); setConfirmProjectName(""); }}
+                            className="w-full px-3 py-2 rounded border text-sm dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-200"
+                        >
+                            <option value="">Select a project…</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        {selectedProject && (
+                            <div className="flex gap-2">
                                 <input
                                     type="text"
-                                    value={confirmText}
-                                    onChange={(e) => setConfirmText(e.target.value)}
-                                    placeholder="Workspace name"
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
+                                    value={confirmProjectName}
+                                    onChange={(e) => setConfirmProjectName(e.target.value)}
+                                    placeholder={`Type "${selectedProject.name}" to confirm`}
+                                    className="flex-1 px-3 py-2 rounded border text-sm dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-200 focus:outline-none focus:border-red-500"
                                 />
-                            </div>
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => {
-                                        setDeleteConfirm(false);
-                                        setConfirmText("");
-                                    }}
-                                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-zinc-600 rounded-md text-gray-700 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
-                                >
-                                    Cancel
-                                </button>
                                 <LoadingButton
-                                    onClick={handleDeleteWorkspace}
-                                    loading={loading}
-                                    disabled={confirmText !== currentWorkspace.name}
-                                    className="flex-1 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    onClick={handleDeleteProject}
+                                    loading={isDeletingProject}
+                                    disabled={confirmProjectName !== selectedProject.name}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-sm font-medium whitespace-nowrap"
                                 >
-                                    <Trash2 size={16} />
-                                    Delete Workspace
+                                    <Trash2 className="size-4" /> Delete Project
                                 </LoadingButton>
                             </div>
+                        )}
+                    </div>
+
+                    {/* ── Delete Task ── */}
+                    <div className="space-y-3 pb-6 border-b border-zinc-100 dark:border-zinc-800">
+                        <div>
+                            <p className="font-medium text-gray-900 dark:text-white">Delete Task</p>
+                            <p className="text-sm text-gray-500 dark:text-zinc-400">Permanently delete a single task from a project.</p>
+                        </div>
+                        <select
+                            value={taskProjectId}
+                            onChange={(e) => { setTaskProjectId(e.target.value); setSelectedTaskId(""); setConfirmTaskTitle(""); }}
+                            className="w-full px-3 py-2 rounded border text-sm dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-200"
+                        >
+                            <option value="">Select a project…</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        {taskProjectId && (
+                            <select
+                                value={selectedTaskId}
+                                onChange={(e) => { setSelectedTaskId(e.target.value); setConfirmTaskTitle(""); }}
+                                className="w-full px-3 py-2 rounded border text-sm dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-200"
+                            >
+                                <option value="">Select a task…</option>
+                                {tasksForSelectedProject.length === 0
+                                    ? <option disabled>No tasks in this project</option>
+                                    : tasksForSelectedProject.map(t => <option key={t.id} value={t.id}>{t.title}</option>)
+                                }
+                            </select>
+                        )}
+                        {selectedTask && (
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={confirmTaskTitle}
+                                    onChange={(e) => setConfirmTaskTitle(e.target.value)}
+                                    placeholder={`Type "${selectedTask.title}" to confirm`}
+                                    className="flex-1 px-3 py-2 rounded border text-sm dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-200 focus:outline-none focus:border-red-500"
+                                />
+                                <LoadingButton
+                                    onClick={handleDeleteTask}
+                                    loading={isDeletingTask}
+                                    disabled={confirmTaskTitle !== selectedTask.title}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-sm font-medium whitespace-nowrap"
+                                >
+                                    <Trash2 className="size-4" /> Delete Task
+                                </LoadingButton>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* ── Delete Workspace (owner only) ── */}
+                    {isOwner && (
+                        <div className="space-y-3">
+                            <div>
+                                <p className="font-medium text-gray-900 dark:text-white">Delete Workspace</p>
+                                <p className="text-sm text-gray-500 dark:text-zinc-400">Permanently delete this workspace and all its data</p>
+                            </div>
+                            {!deleteConfirm ? (
+                                <button
+                                    onClick={() => setDeleteConfirm(true)}
+                                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm"
+                                >
+                                    Delete Workspace
+                                </button>
+                            ) : (
+                                <div className="space-y-3">
+                                    <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                                        <p className="text-sm text-red-600 dark:text-red-400">
+                                            This cannot be undone. This will permanently delete <strong>{currentWorkspace.name}</strong>, all projects, tasks, and member associations.
+                                        </p>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={confirmText}
+                                        onChange={(e) => setConfirmText(e.target.value)}
+                                        placeholder={`Type "${currentWorkspace.name}" to confirm`}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-md bg-white dark:bg-zinc-800 text-gray-900 dark:text-white text-sm"
+                                    />
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => { setDeleteConfirm(false); setConfirmText(""); }}
+                                            className="flex-1 px-4 py-2 border border-gray-300 dark:border-zinc-600 rounded-md text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <LoadingButton
+                                            onClick={handleDeleteWorkspace}
+                                            loading={loading}
+                                            disabled={confirmText !== currentWorkspace.name}
+                                            className="flex-1 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+                                        >
+                                            <Trash2 size={16} /> Delete Workspace
+                                        </LoadingButton>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

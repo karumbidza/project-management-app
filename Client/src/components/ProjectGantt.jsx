@@ -692,7 +692,7 @@ export default function ProjectGantt({ tasks, project }) {
 
                     // Row styling per reference — FOLLO GANTT-DONE adds done-early/late tinting
                     const rowStyle = {
-                        display: 'grid', gridTemplateColumns: `${LEFT_COL}px 1fr`, alignItems: 'center',
+                        display: 'grid', gridTemplateColumns: `${LEFT_COL}px 1fr`, alignItems: 'stretch',
                         height: ROW_HEIGHT, borderRadius: 7,
                         background: hasTint ? tintBg : '#fafafa',
                         border: state.isOverdue ? '0.5px solid #fecaca'
@@ -712,11 +712,13 @@ export default function ProjectGantt({ tasks, project }) {
                         >
                             {/* LEFT COLUMN: frozen, solid bg so scrolled bars don't show through */}
                             <div
+                                className="border-r border-zinc-200 dark:border-zinc-800"
                                 style={{
                                     padding: '0 12px', overflow: 'hidden',
-                                    position: 'sticky', left: 0, zIndex: 10, flexShrink: 0, width: LEFT_COL,
+                                    position: 'sticky', left: 0, zIndex: 10,
+                                    width: LEFT_COL, minWidth: LEFT_COL,
                                     display: 'flex', flexDirection: 'column', justifyContent: 'center',
-                                    background: hasTint ? tintBg : '#fafafa',
+                                    background: 'var(--color-background-secondary, #f4f4f5)',
                                 }}
                                 title={task.status !== 'DONE' ? `Completing this task adds ${calcTaskContribution(task, tasks)}% to project progress` : undefined}
                             >

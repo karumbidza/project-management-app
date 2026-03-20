@@ -1,5 +1,6 @@
 // FOLLO AUTH-FIX
 // FOLLO SRP
+// FOLLO ROLE-FLASH
 // FOLLO FIX
 // FOLLO PERMISSIONS
 // FOLLO WORKFLOW
@@ -245,6 +246,11 @@ const initialState = {
     myProjects: [],
     currentProject: null,
     isMemberView: false, // true when user has projects but no workspaces (member-only)
+    roleConfirmed: false, // FOLLO ROLE-FLASH: true after first fetchWorkspaces resolves — gates sidebar render
+    // FOLLO GLITCH-FIX: track the requestId of the latest fetchWorkspaces dispatch.
+    // Stale in-flight responses (requestId mismatch) are discarded so a focus-triggered
+    // GET that started before a project was created can't overwrite the fresh Redux state.
+    _latestWorkspacesRequestId: null,
     allUsers: [], // All system users (for admin invite dropdown)
     loading: false,
     error: null,
@@ -268,6 +274,7 @@ const workspaceSlice = createSlice({
     initialState,
     reducers: {
         // FOLLO AUTH-FIX — reset all state when userId changes (account switch)
+        // FOLLO ROLE-FLASH — also resets roleConfirmed so skeleton re-shows for new user
         clearWorkspaceState: (state) => {
             state.workspaces = [];
             state.currentWorkspace = null;
@@ -275,6 +282,8 @@ const workspaceSlice = createSlice({
             state.currentProject = null;
             state.allUsers = [];
             state.isMemberView = false;
+            state.roleConfirmed = false;
+            state._latestWorkspacesRequestId = null; // FOLLO GLITCH-FIX
             state.loading = false;
             state.error = null;
             state.loadingStates = {
@@ -405,12 +414,21 @@ const workspaceSlice = createSlice({
             })
 
             // ━━━ Fetch Workspaces ━━━
-            .addCase(fetchWorkspaces.pending, (state) => {
+            .addCase(fetchWorkspaces.pending, (state, action) => {
                 state.loadingStates.workspaces = true;
+                state._latestWorkspacesRequestId = action.meta.requestId; // FOLLO GLITCH-FIX: track latest
                 state.error = null;
             })
             .addCase(fetchWorkspaces.fulfilled, (state, action) => {
+                // FOLLO GLITCH-FIX: discard stale responses — only the latest dispatch wins.
+                // A focus-triggered GET that started before a project POST must not overwrite
+                // the Redux state that already has the newly created project.
+                if (action.meta.requestId !== state._latestWorkspacesRequestId) {
+                    state.loadingStates.workspaces = false;
+                    return;
+                }
                 state.loadingStates.workspaces = false;
+                state.roleConfirmed = true; // FOLLO ROLE-FLASH: role is now knowable — unblock sidebar
                 state.workspaces = action.payload || [];
                 
                 // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
@@ -426,7 +444,13 @@ const workspaceSlice = createSlice({
                 }
             })
             .addCase(fetchWorkspaces.rejected, (state, action) => {
+                // FOLLO GLITCH-FIX: only process if this is still the latest request
+                if (action.meta.requestId !== state._latestWorkspacesRequestId) {
+                    state.loadingStates.workspaces = false;
+                    return;
+                }
                 state.loadingStates.workspaces = false;
+                state.roleConfirmed = true; // FOLLO ROLE-FLASH: even on error, stop blocking sidebar
                 state.error = action.payload;
                 console.error('[Workspace] fetchWorkspaces rejected:', action.payload); // FOLLO BUGFIX-REFRESH
             })
@@ -493,6 +517,17 @@ const workspaceSlice = createSlice({
                         localStorage.removeItem("currentWorkspaceId");
                     }
                 }
+                // Clear project data that belonged to the deleted workspace so
+                // stale projects don't surface in member-view after deletion.
+                state.myProjects = state.myProjects.filter(p => p.workspaceId !== workspaceId);
+                if (state.currentProject?.workspaceId === workspaceId) {
+                    state.currentProject = null;
+                    localStorage.removeItem("currentProjectId");
+                }
+                // FOLLO GLITCH-FIX: stamp a sentinel so any in-flight fetchWorkspaces
+                // (e.g. focus-triggered) resolves with a mismatched requestId and is
+                // discarded — preventing the deleted workspace from being restored.
+                state._latestWorkspacesRequestId = `deleted-${workspaceId}`;
             })
             .addCase(deleteWorkspaceAsync.rejected, (state, action) => {
                 state.loadingStates.workspaces = false;

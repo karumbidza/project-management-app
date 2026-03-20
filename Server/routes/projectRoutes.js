@@ -1,8 +1,10 @@
+// FOLLO ACCESS-SEC
 /**
  * Project Routes
  * /api/v1/projects
  */
 
+// FOLLO PROJECT-OVERVIEW
 import express from "express";
 import {
   getWorkspaceProjects,
@@ -16,10 +18,20 @@ import {
   updateProjectMemberRole,
   removeProjectMember,
   toggleProjectMember,
+  getPinnedLinks,
+  addPinnedLink,
+  deletePinnedLink,
 } from "../controllers/projectController.js";
-import { 
-  validate, 
-  createProjectSchema, 
+import {
+  getProjectComments,
+  addProjectComment,
+  deleteProjectComment,
+} from "../controllers/projectCommentController.js";
+import { writeLimiter, commentLimiter } from "../middlewares/rateLimiter.js";
+import { requireWorkspaceMembership } from "../middlewares/requireWorkspaceMember.js";
+import {
+  validate,
+  createProjectSchema,
   updateProjectSchema,
   addProjectMemberSchema,
 } from "../utils/validators.js";
@@ -38,12 +50,14 @@ router.get("/my-projects", getMyProjects);
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // GET /api/v1/projects/workspace/:workspaceId - Get all projects in workspace
-router.get("/workspace/:workspaceId", getWorkspaceProjects);
+router.get("/workspace/:workspaceId", requireWorkspaceMembership, getWorkspaceProjects);
 
 // POST /api/v1/projects/workspace/:workspaceId - Create project in workspace
 router.post(
-  "/workspace/:workspaceId", 
-  validate(createProjectSchema), 
+  "/workspace/:workspaceId",
+  requireWorkspaceMembership,
+  validate(createProjectSchema),
+  writeLimiter,
   createProject
 );
 
@@ -85,5 +99,19 @@ router.delete("/:projectId/members/:memberId", removeProjectMember);
 
 // PATCH /api/v1/projects/:projectId/members/:memberId/toggle - Enable/disable member
 router.patch("/:projectId/members/:memberId/toggle", toggleProjectMember);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROJECT COMMENT ROUTES (FOLLO PROJECT-OVERVIEW)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+router.get("/:projectId/comments", getProjectComments);
+router.post("/:projectId/comments", commentLimiter, addProjectComment);
+router.delete("/:projectId/comments/:commentId", writeLimiter, deleteProjectComment);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PINNED LINKS ROUTES (FOLLO PROJECT-OVERVIEW)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+router.get("/:projectId/links", getPinnedLinks);
+router.post("/:projectId/links", writeLimiter, addPinnedLink);
+router.delete("/:projectId/links/:linkId", writeLimiter, deletePinnedLink);
 
 export default router;

@@ -1,11 +1,16 @@
+// FOLLO ACCESS-SEC
+// FOLLO AUDIT
 // FOLLO AUTH-FIX
 // FOLLO FIX
 // FOLLO BUGFIX-REFRESH
 // FOLLO ACCESS
+// FOLLO ROLE-FIX
+// FOLLO ROLE-FLASH
 import { useState, useEffect, useRef } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import MemberSidebar from '../components/MemberSidebar'
+import AppLoadingSkeleton from '../components/AppLoadingSkeleton'
 import { Outlet, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loadTheme } from '../features/themeSlice'
@@ -17,7 +22,7 @@ import { useNotifications } from '../hooks/useNotifications'
 
 function Layout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-    const { loadingStates, error, workspaces, currentWorkspace, myProjects, currentProject, isMemberView } = useSelector((state) => state.workspace)
+    const { loadingStates, error, workspaces, currentWorkspace, myProjects, currentProject, isMemberView, roleConfirmed } = useSelector((state) => state.workspace)
     const dispatch = useDispatch()
     const { user, isLoaded } = useUser()
     const { getToken, userId } = useAuth()
@@ -38,9 +43,15 @@ function Layout() {
         if (!isLoaded || !userId || !getToken) return
 
         // FOLLO AUTH-FIX: If userId changed, clear stale state from previous session
+        // FOLLO ROLE-FLASH: clearWorkspaceState also resets roleConfirmed → skeleton re-shows
         if (prevUserIdRef.current && prevUserIdRef.current !== userId) {
             dispatch(clearWorkspaceState())
             hasFetched.current = false
+            // Clear previous user's localStorage (workspace/project selections, etc.)
+            const keysToKeep = new Set(['theme', 'colorMode'])
+            Object.keys(localStorage).forEach(key => {
+                if (!keysToKeep.has(key)) localStorage.removeItem(key)
+            })
         }
         prevUserIdRef.current = userId
 
@@ -84,20 +95,15 @@ function Layout() {
         }
     }, [isLoaded, userId, dispatch]) // FOLLO BUGFIX-REFRESH: isLoaded in deps ensures Clerk is ready
 
-    // Debug log (only in dev)
+    // FOLLO ACCESS-SEC — re-fetch workspace on tab focus to catch role changes
     useEffect(() => {
-        if (process.env.NODE_ENV === 'development') {
-            console.log('[Layout] State:', { 
-                workspacesCount: workspaces?.length, 
-                currentWorkspace: currentWorkspace?.name,
-                myProjectsCount: myProjects?.length,
-                currentProject: currentProject?.name,
-                isMemberView,
-                loading: loadingStates?.workspaces || loadingStates?.myProjects,
-                error 
-            });
-        }
-    }, [workspaces?.length, currentWorkspace?.name, loadingStates?.workspaces, error])
+        if (!userId || !getToken) return;
+        const handleFocus = () => {
+            dispatch(fetchWorkspaces(getToken));
+        };
+        window.addEventListener('focus', handleFocus);
+        return () => window.removeEventListener('focus', handleFocus);
+    }, [userId, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // 1. First: Wait for Clerk to finish loading
     if (!isLoaded) {
@@ -124,18 +130,12 @@ function Layout() {
         )
     }
 
-    // FOLLO BUGFIX-REFRESH: Show spinner while initial data loads.
-    // Covers the gap between "Clerk ready" and "first fetch pending/fulfilled".
-    // hasFetched.current being false means we haven't even started fetching yet.
-    const isInitialLoad = !hasFetched.current || 
-        ((loadingStates?.workspaces || loadingStates?.myProjects) && 
-         workspaces?.length === 0 && myProjects?.length === 0);
-    if (isInitialLoad) {
-        return (
-            <div className='flex items-center justify-center h-screen bg-white dark:bg-zinc-950'>
-                <Loader2Icon className="size-7 text-blue-500 animate-spin" />
-            </div>
-        )
+    // FOLLO ROLE-FLASH: Block sidebar render until role is confirmed.
+    // roleConfirmed becomes true only after fetchWorkspaces fulfills or rejects.
+    // This guarantees the CORRECT sidebar (admin or member) renders on the very first frame —
+    // eliminating the flash where admin sidebar briefly shows for a member user.
+    if (!roleConfirmed) {
+        return <AppLoadingSkeleton />;
     }
 
     // 4. Show error if fetch failed and no data
@@ -158,20 +158,23 @@ function Layout() {
     }
 
     // 5. Determine which sidebar to show based on user type
-    // Show member view if: user is not ADMIN/OWNER in any workspace AND has projects to view
-    const workspacesLoaded = !loadingStates?.workspaces;
-    
     // FOLLO AUTH-FIX: Use live userId from useAuth() (already in scope), not user?.id
-    const isAdminInAnyWorkspace = workspaces?.some(ws => {
+    // FOLLO ROLE-FLASH: Gate on roleConfirmed (not workspacesLoaded) so focus-triggered re-fetches
+    // don't briefly flip the sidebar. roleConfirmed only resets on user switch, not on re-fetch.
+    const isAdminInAnyWorkspace = roleConfirmed && workspaces?.some(ws => {
         if (ws.ownerId === userId) return true;
-        return ws.members?.some(m => 
+        return ws.members?.some(m =>
             (m.userId === userId || m.user?.id === userId) && m.role === 'ADMIN'
         );
     });
-    
-    // Member view: anyone who is not an admin in any workspace
-    // Non-admins always see member sidebar — they cannot create workspaces
-    const showMemberView = workspacesLoaded && !isAdminInAnyWorkspace;
+
+    // FOLLO ROLE-FIX: Member view is based on WorkspaceMember.role, not project count.
+    const isMemberInAnyWorkspace = roleConfirmed && (workspaces?.some(ws =>
+        ws.members?.some(m =>
+            (m.userId === userId || m.user?.id === userId) && m.role === 'MEMBER'
+        )
+    ) ?? false);
+    const showMemberView = roleConfirmed && isMemberInAnyWorkspace && !isAdminInAnyWorkspace;
 
     return (
         <div className="flex bg-white dark:bg-zinc-950 text-gray-900 dark:text-slate-100">

@@ -1,3 +1,4 @@
+// FOLLO AUDIT
 // FOLLO SLA — Phase 7: Task Template Library
 import prisma from "../configs/prisma.js";
 import { asyncHandler } from "../utils/errors.js";
@@ -40,7 +41,7 @@ export const getTaskTemplate = asyncHandler(async (req, res) => {
 
 /** POST /api/v1/templates/tasks */
 export const createTaskTemplate = asyncHandler(async (req, res) => {
-    const userId = req.auth.userId;
+    const { userId } = await req.auth();
     const { workspaceId, name, description, type, priority, durationDays, completionWeight, checklist } = req.body;
 
     if (!workspaceId || !name) throw new ValidationError("workspaceId and name are required");
@@ -145,7 +146,7 @@ export const getProjectTemplate = asyncHandler(async (req, res) => {
 
 /** POST /api/v1/templates/projects */
 export const createProjectTemplate = asyncHandler(async (req, res) => {
-    const userId = req.auth.userId;
+    const { userId } = await req.auth();
     const { workspaceId, name, description, tasks } = req.body;
 
     if (!workspaceId || !name) throw new ValidationError("workspaceId and name are required");
@@ -223,7 +224,7 @@ export const deleteProjectTemplate = asyncHandler(async (req, res) => {
 
 /** POST /api/v1/templates/projects/:id/apply */
 export const applyProjectTemplate = asyncHandler(async (req, res) => {
-    const userId = req.auth.userId;
+    const { userId } = await req.auth();
     const { projectId, startDate: rawStart, assigneeMap } = req.body;
 
     if (!projectId) throw new ValidationError("projectId is required");

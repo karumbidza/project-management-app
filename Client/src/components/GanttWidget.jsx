@@ -598,7 +598,7 @@ export default function GanttWidget() {
                                             position: 'sticky', left: 0, zIndex: 15,
                                             display: 'flex', flexDirection: 'column', justifyContent: 'center',
                                             padding: '0 12px', overflow: 'hidden',
-                                            background: rowBg,
+                                            background: 'var(--color-background-secondary, #f4f4f5)',
                                         }}
                                     >
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>

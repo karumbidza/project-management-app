@@ -34,7 +34,6 @@
     "@aws-sdk/s3-request-presigner": "^3.1004.0",
     "@clerk/express": "^1.7.76",
     "@mux/mux-node": "^12.8.1",
-    "@neondatabase/serverless": "^1.0.2",
     "@prisma/client": "^5.22.0",
     "@sentry/node": "^10.44.0",
     "@sentry/profiling-node": "^10.44.0",
@@ -53,7 +52,6 @@
     "svix": "^1.86.0",
     "uuid": "^13.0.0",
     "web-push": "^3.6.7",
-    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

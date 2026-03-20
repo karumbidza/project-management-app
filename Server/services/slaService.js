@@ -1,4 +1,5 @@
 // FOLLO SRP
+// FOLLO INSTANT
 /**
  * SLA Service
  * Business logic for task submission, approval, rejection, blockers, extensions, and SLA summary.
@@ -6,6 +7,7 @@
  */
 
 import * as slaRepo from "../repositories/slaRepository.js";
+import { invalidateCache, CACHE_KEYS } from "../lib/cache.js";
 import {
   NotFoundError,
   AuthorizationError,
@@ -95,6 +97,10 @@ export async function submitTask(taskId, userId, body) {
     ...pauseClockData(now),
   });
 
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
+
   await logSlaEvent(prisma, { taskId, type: SLA_EVENT_TYPE.SUBMITTED, triggeredBy: userId });
 
   if (task.rejectedAt) {
@@ -150,6 +156,10 @@ export async function approveTask(taskId, userId) {
     actualEndDate: task.actualEndDate || now,
     ...clockData,
   });
+
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(updated.projectId));
 
   await logSlaEvent(prisma, { taskId, type: SLA_EVENT_TYPE.APPROVED, triggeredBy: userId, metadata: { onTime, early } });
 
@@ -219,6 +229,10 @@ export async function rejectTask(taskId, userId, body) {
     ...clockData,
   });
 
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(updated.projectId));
+
   await logSlaEvent(prisma, { taskId, type: SLA_EVENT_TYPE.REJECTED, triggeredBy: userId, metadata: { reason: reason.trim() } });
   await updateContractorScore(prisma, task.assigneeId, taskId, 'REJECTION');
 
@@ -281,6 +295,10 @@ export async function raiseBlocker(taskId, userId, body) {
     slaStatus: SLA_STATUS.BLOCKED, status: 'BLOCKED',
     ...pauseClockData(now),
   });
+
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(updated.projectId));
 
   await logSlaEvent(prisma, {
     taskId, type: SLA_EVENT_TYPE.BLOCKER_RAISED, triggeredBy: userId,
@@ -356,6 +374,10 @@ export async function resolveBlocker(taskId, userId, body) {
     slaStatus: newSlaStatus, status: 'IN_PROGRESS',
     ...clockData,
   });
+
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(updated.projectId));
 
   await logSlaEvent(prisma, {
     taskId, type: SLA_EVENT_TYPE.BLOCKER_RESOLVED, triggeredBy: userId,
@@ -496,6 +518,10 @@ export async function requestExtension(taskId, userId, body) {
     extensionOriginalDueDate: task.extensionOriginalDueDate || task.dueDate,
   });
 
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
+
   await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_REQUESTED || 'EXTENSION_REQUESTED', userId, {
     reason: reason.trim(),
     proposedDate: proposed.toISOString(),
@@ -550,6 +576,10 @@ export async function approveExtension(taskId, userId) {
     dueDate: task.extensionProposedDate,
   });
 
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
+
   await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_APPROVED || 'EXTENSION_APPROVED', userId, {
     newDueDate: task.extensionProposedDate?.toISOString(),
     originalDueDate: task.extensionOriginalDueDate?.toISOString(),
@@ -600,6 +630,10 @@ export async function denyExtension(taskId, userId, body) {
     extensionDeniedAt: new Date(),
     extensionDeniedById: userId,
   });
+
+  // FOLLO INSTANT: bust task + project task list caches
+  invalidateCache(CACHE_KEYS.task(taskId));
+  invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
   await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_DENIED || 'EXTENSION_DENIED', userId, {
     reason: reason?.trim() || 'No reason provided',

@@ -1,3 +1,4 @@
+// FOLLO ACCESS-SEC
 // FOLLO SECURITY
 // FOLLO CARD-HISTORY
 /**
@@ -15,9 +16,11 @@ import {
   getAllUsers,
   getDashboardStats,
   getDashboardHistory,
+  getMyRole,
 } from "../controllers/workspaceController.js";
 import { validate, createWorkspaceSchema, addWorkspaceMemberSchema } from "../utils/validators.js";
 import { writeLimiter } from "../middlewares/rateLimiter.js";
+import { requireWorkspaceMembership } from "../middlewares/requireWorkspaceMember.js";
 
 const workspaceRouter = express.Router();
 
@@ -37,13 +40,18 @@ workspaceRouter.get("/users", getAllUsers);
 workspaceRouter.get("/dashboard/stats", getDashboardStats);
 workspaceRouter.get("/dashboard/history", getDashboardHistory);
 
+// GET /api/v1/workspaces/:workspaceId/my-role - Get caller's role in workspace
+// FOLLO ACCESS-SEC — must be before /:workspaceId to avoid route conflict
+workspaceRouter.get("/:workspaceId/my-role", getMyRole);
+
 // DELETE /api/v1/workspaces/:workspaceId - Delete workspace (owner only)
-workspaceRouter.delete("/:workspaceId", writeLimiter, deleteWorkspace);
+workspaceRouter.delete("/:workspaceId", writeLimiter, requireWorkspaceMembership, deleteWorkspace);
 
 // POST /api/v1/workspaces/add-member - Add member to workspace
 workspaceRouter.post(
   "/add-member",
   writeLimiter,
+  requireWorkspaceMembership,
   validate(addWorkspaceMemberSchema),
   addMemberToWorkspace
 );

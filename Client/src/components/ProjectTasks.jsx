@@ -1,12 +1,13 @@
 // FOLLO FIX
 // FOLLO PERMISSIONS
 // FOLLO WORKFLOW
+// FOLLO ACCESS-UX
 import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import { updateTaskAsync, deleteTaskAsync } from "../features/taskSlice";
 import { CalendarIcon, Shield, Trash, XIcon } from "lucide-react";
 import useUserRole from "../hooks/useUserRole";
@@ -36,7 +37,8 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
     const { getToken } = useAuth();
-    const { canApproveReject } = useUserRole();
+    const { canApproveReject, isMemberView } = useUserRole();
+    const { user } = useUser();
     const [selectedTasks, setSelectedTasks] = useState([]);
 
     const [filters, setFilters] = useState({
@@ -60,6 +62,11 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
             );
         });
     }, [filters, tasks]);
+
+    // FOLLO ACCESS-UX — State 6: detect if member has any tasks assigned
+    const userAssignedCount = isMemberView
+        ? filteredTasks.filter(t => t.assigneeId === user?.id).length
+        : null;
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
@@ -159,6 +166,14 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
                 )}
             </div>
 
+            {/* FOLLO ACCESS-UX — State 6: notice when member has no tasks assigned */}
+            {isMemberView && filteredTasks.length > 0 && userAssignedCount === 0 && (
+                <div className="mb-3 px-3 py-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/15 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                    <span>ℹ️</span>
+                    <span>None of these tasks are currently assigned to you.</span>
+                </div>
+            )}
+
             {/* Tasks Table */}
             <div className="overflow-auto rounded-lg lg:border border-zinc-300 dark:border-zinc-800">
                 <div className="w-full">
@@ -184,7 +199,7 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
                                         const ps = getPriorityStyle(task.priority);
 
                                         return (
-                                            <tr key={task.id} onClick={() => navigate(`/taskDetails?projectId=${task.projectId || propProjectId}&taskId=${task.id}`)} className=" border-t border-zinc-300 dark:border-zinc-800 group hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all cursor-pointer" >
+                                            <tr key={task.id} onClick={() => navigate(`/taskDetails?projectId=${task.projectId || propProjectId}&taskId=${task.id}`)} className={`border-t border-zinc-300 dark:border-zinc-800 group hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-all cursor-pointer${isMemberView && task.assigneeId !== user?.id ? ' opacity-50' : ''}`}>
                                                 <td onClick={e => e.stopPropagation()} className="pl-2 pr-1">
                                                     <input type="checkbox" className="size-3 accent-zinc-600 dark:accent-zinc-500" onChange={() => selectedTasks.includes(task.id) ? setSelectedTasks(selectedTasks.filter((i) => i !== task.id)) : setSelectedTasks((prev) => [...prev, task.id])} checked={selectedTasks.includes(task.id)} />
                                                 </td>
@@ -219,8 +234,12 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
                                     })
                                 ) : (
                                     <tr>
-                                        <td colSpan="7" className="text-center text-zinc-500 dark:text-zinc-400 py-6">
-                                            No tasks found for the selected filters.
+                                        <td colSpan="7" className="text-center text-zinc-500 dark:text-zinc-400 py-8">
+                                            {isMemberView && tasks.length === 0
+                                                ? 'No tasks in this project yet.'
+                                                : isMemberView && tasks.length > 0
+                                                    ? 'No tasks match your filters.'
+                                                    : 'No tasks found for the selected filters.'}
                                         </td>
                                     </tr>
                                 )}
@@ -235,10 +254,10 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
                                 const ps = getPriorityStyle(task.priority);
 
                                 return (
-                                    <div 
-                                        key={task.id} 
+                                    <div
+                                        key={task.id}
                                         onClick={() => navigate(`/taskDetails?projectId=${task.projectId || propProjectId}&taskId=${task.id}`)}
-                                        className="dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-2 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors"
+                                        className={`dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-300 dark:border-zinc-800 rounded-lg p-4 flex flex-col gap-2 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors${isMemberView && task.assigneeId !== user?.id ? ' opacity-50' : ''}`}
                                     >
                                         <div className="flex items-center justify-between">
                                             <h3 className="text-zinc-900 dark:text-zinc-200 text-sm font-semibold">{task.title}</h3>
@@ -274,8 +293,10 @@ const ProjectTasks = ({ tasks, projectId: propProjectId }) => {
                                 );
                             })
                         ) : (
-                            <p className="text-center text-zinc-500 dark:text-zinc-400 py-4">
-                                No tasks found for the selected filters.
+                            <p className="text-center text-zinc-500 dark:text-zinc-400 py-6">
+                                {isMemberView && tasks.length === 0
+                                    ? 'No tasks in this project yet.'
+                                    : 'No tasks match your filters.'}
                             </p>
                         )}
                     </div>

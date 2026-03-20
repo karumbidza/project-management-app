@@ -1,3 +1,4 @@
+// FOLLO ACCESS-SEC
 // FOLLO SRP
 // FOLLO WORKFLOW
 // FOLLO ACCESS
@@ -223,6 +224,14 @@ export async function createTask(projectId, userId, body) {
   const project = await taskRepo.findProjectWithAccessInfo(projectId);
   if (!project) throw new NotFoundError('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
+  // FOLLO ACCESS-SEC — block mutations on archived/completed projects
+  if (project.status === 'COMPLETED' || project.status === 'CANCELLED') {
+    throw new AuthorizationError(
+      `Project "${project.name}" is ${project.status.toLowerCase()}. No new tasks can be created.`,
+      'PROJECT_NOT_ACTIVE'
+    );
+  }
+
   const isWorkspaceMember = project.workspace?.members?.some(m => m.userId === userId) || false;
   const isProjectMember = project.members.some(m => m.userId === userId);
   if (!isWorkspaceMember && !isProjectMember) {
@@ -365,6 +374,14 @@ export async function updateTask(taskId, userId, body) {
   if (!task) throw new NotFoundError('Task not found', ERROR_CODES.TASK_NOT_FOUND);
 
   checkTaskAccess(task, userId);
+
+  // FOLLO ACCESS-SEC — block mutations on archived/completed projects
+  if (task.project?.status === 'COMPLETED' || task.project?.status === 'CANCELLED') {
+    throw new AuthorizationError(
+      `Project "${task.project.name}" is ${task.project.status.toLowerCase()}. Tasks cannot be modified.`,
+      'PROJECT_NOT_ACTIVE'
+    );
+  }
 
   // FOLLO WORKFLOW — enforce valid status transitions
   if (status && status !== task.status) {

@@ -34,7 +34,7 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
             
             // Also create in our database immediately (don't wait for webhook)
             const token = await getToken();
-            await fetch(`${API_URL}/api/v1/workspaces/sync`, {
+            const syncRes = await fetch(`${API_URL}/api/v1/workspaces/sync`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -49,6 +49,10 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
                     image_url: organization.imageUrl,
                 }),
             });
+            if (!syncRes.ok) {
+                const body = await syncRes.json().catch(() => ({}));
+                throw new Error(body?.error?.message || 'Failed to sync workspace to database');
+            }
             
             // Set this as the active organization
             await setActive({ organization: organization.id });
