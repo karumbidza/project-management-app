@@ -47,9 +47,9 @@ export default function ProjectDetail() {
     const { user } = useUser();
     const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject } = useUserRole();
 
-    // FOLLO ROLE-FLASH: members must not see Project Overview (management-layer data).
-    // If a member somehow lands on ?tab=overview (e.g. direct URL), silently redirect to tasks.
-    const tab = (isMemberView && rawTab === 'overview') ? 'tasks' : rawTab;
+    // FOLLO ROLE-FLASH: members must not see Project Overview or Settings (admin-only tabs).
+    // If a member somehow lands on these tabs (e.g. direct URL), silently redirect to tasks.
+    const tab = (isMemberView && (rawTab === 'overview' || rawTab === 'settings')) ? 'tasks' : rawTab;
 
     // FOLLO ROLE-FLASH: tabs available to the current user
     const visibleTabs = isMemberView
@@ -98,10 +98,20 @@ export default function ProjectDetail() {
             }
         });
 
+        // FOLLO ACCESS-SEC — redirect immediately if this user's access is revoked
+        socket.on('permission:revoked', ({ userId: revokedId, workspaceId, projectId: revokedProjectId }) => {
+            if (revokedId !== userIdRef.current) return;
+            const affectsHere = revokedProjectId === id || workspaceId !== undefined;
+            if (!affectsHere) return;
+            dispatch(fetchWorkspaces(getToken));
+            navigate('/projects', { replace: true });
+        });
+
         return () => {
             socket.emit('leave_project', id);
             socket.off('task_created');
             socket.off('task_updated');
+            socket.off('permission:revoked');
             socket.disconnect();
         };
     }, [id, dispatch]);

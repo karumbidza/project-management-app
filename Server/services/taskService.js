@@ -24,22 +24,52 @@ import {
   LIMITS,
 } from "../utils/constants.js";
 import emailService from "../utils/emailService.js";
-import { createNotification } from "../utils/notificationService.js";
+import { createNotification, createBulkNotifications } from "../utils/notificationService.js";
 import { withCache, invalidateCache, invalidateCachePattern, CACHE_KEYS, CACHE_TTL } from "../lib/cache.js";
 import { requireProjectManager } from "../utils/permissions.js";
 import { inngest } from "../inngest/client.js";
-import { SLA_EVENT_TYPE, logSlaEvent } from "../lib/sla.js";
+import { SLA_STATUS, SLA_EVENT_TYPE, logSlaEvent, resumeClockData, calculateSlaStatus } from "../lib/sla.js";
 import { io } from "../server.js";
 import prisma from "../configs/prisma.js";
 import { updateTaskPriority, recalculateAfterDependencyChange } from "../lib/priorityCalculator.js";
 
 // FOLLO ASSIGN — auto-add user to project as CONTRIBUTOR if not already a member
+// FOLLO ACCESS-SEC — validates workspace membership + isActive before adding
 async function ensureProjectMember(projectId, userId) {
   if (!userId) return;
+
   const existing = await prisma.projectMember.findUnique({
-    where: { userId_projectId: { userId, projectId } },
+    where:  { userId_projectId: { userId, projectId } },
+    select: { isActive: true },
   });
+
+  // Reject deactivated members
+  if (existing && existing.isActive === false) {
+    throw new AuthorizationError(
+      'This project member has been deactivated and cannot be assigned tasks',
+      'MEMBER_INACTIVE'
+    );
+  }
+
   if (!existing) {
+    // Verify the user is a workspace member before auto-adding to project
+    const project = await prisma.project.findUnique({
+      where:  { id: projectId },
+      select: { workspaceId: true },
+    });
+
+    if (project) {
+      const wsMember = await prisma.workspaceMember.findUnique({
+        where: { userId_workspaceId: { userId, workspaceId: project.workspaceId } },
+      });
+      if (!wsMember) {
+        throw new AuthorizationError(
+          'Assignee is not a member of this workspace',
+          'WORKSPACE_MEMBER_REQUIRED'
+        );
+      }
+    }
+
     await prisma.projectMember.create({
       data: { projectId, userId, role: 'CONTRIBUTOR' },
     });
@@ -106,7 +136,8 @@ const hasCircularDependency = async (taskId, predecessorId, visited = new Set())
 
 function checkTaskAccess(task, userId) {
   const isWorkspaceMember = task.project.workspace?.members?.some(m => m.userId === userId);
-  const isProjectMember = task.project.members.some(m => m.userId === userId);
+  // isActive=false means the member has been disabled — treat as no access
+  const isProjectMember = task.project.members.some(m => m.userId === userId && m.isActive !== false);
   if (!isWorkspaceMember && !isProjectMember) {
     throw new AuthorizationError(
       'Not authorized to access this task',
@@ -138,14 +169,15 @@ export async function getProjectTasks(projectId, userId) {
   if (!project) throw new NotFoundError('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
   const wsMember = project.workspace?.members?.find(m => m.userId === userId);
-  const isProjectMember = project.members.some(m => m.userId === userId);
+  // isActive=false = disabled member — deny access just like a non-member
+  const isProjectMember = project.members.some(m => m.userId === userId && m.isActive !== false);
   if (!wsMember && !isProjectMember) {
     throw new AuthorizationError('Not authorized to view tasks in this project', ERROR_CODES.INSUFFICIENT_PERMISSIONS);
   }
 
   // FOLLO ACCESS: Admins/owners see all tasks; regular members see only their assigned tasks
   const isManager = wsMember?.role === 'ADMIN' || project.workspace?.ownerId === userId
-    || project.members.some(m => m.userId === userId && (m.role === 'OWNER' || m.role === 'MANAGER'));
+    || project.members.some(m => m.userId === userId && m.isActive !== false && (m.role === 'OWNER' || m.role === 'MANAGER'));
 
   const tasks = await withCache(
     CACHE_KEYS.projectTasks(projectId),
@@ -421,6 +453,13 @@ export async function updateTask(taskId, userId, body) {
   if (assigneeId !== undefined && assigneeId !== task.assigneeId) changes.push({ field: 'assignee', old: task.assigneeId, new: assigneeId });
   if (priority && priority !== task.priority) changes.push({ field: 'priority', old: task.priority, new: priority });
 
+  // FOLLO AUTO-UNBLOCK — if this task was blocked solely because it had no assignee,
+  // assigning someone now should auto-resume it without requiring manual admin action.
+  const AUTO_BLOCK_REASON = 'Task blocked — no assignee';
+  const isAutoUnblock = task.status === 'BLOCKED'
+    && task.blockerDescription === AUTO_BLOCK_REASON
+    && assigneeId;
+
   const updateData = {
     ...(title && { title }),
     ...(description !== undefined && { description }),
@@ -437,6 +476,25 @@ export async function updateTask(taskId, userId, body) {
     ...(priorityOverride !== undefined && { priorityOverride }),
   };
 
+  if (isAutoUnblock) {
+    const now = new Date();
+    const clockData = resumeClockData(task, now);
+    const newSlaStatus = (task.dueDate && now > new Date(task.dueDate))
+      ? SLA_STATUS.BREACHED
+      : SLA_STATUS.HEALTHY;
+    updateData.status              = TASK_STATUS.IN_PROGRESS;
+    updateData.slaStatus           = newSlaStatus;
+    updateData.blockerRaisedAt     = null;
+    updateData.blockerDescription  = null;
+    updateData.blockerResolvedAt   = now;
+    updateData.blockerResolvedById = userId;
+    Object.assign(updateData, clockData);
+    // Record the status change for the activity log
+    if (!changes.find(c => c.field === 'status')) {
+      changes.push({ field: 'status', old: 'BLOCKED', new: TASK_STATUS.IN_PROGRESS });
+    }
+  }
+
   if (status === TASK_STATUS.IN_PROGRESS && !task.actualStartDate && !actualStartDate) {
     const now = new Date();
     updateData.actualStartDate = now;
@@ -452,6 +510,55 @@ export async function updateTask(taskId, userId, body) {
   // FOLLO ASSIGN — auto-add new assignee to project if not already a member
   if (assigneeId && assigneeId !== task.assigneeId) {
     await ensureProjectMember(task.projectId, assigneeId);
+  }
+
+  // FOLLO AUTO-UNBLOCK — fire notifications + SLA event after DB write
+  if (isAutoUnblock) {
+    logSlaEvent(prisma, {
+      taskId,
+      type: SLA_EVENT_TYPE.BLOCKER_RESOLVED,
+      triggeredBy: userId,
+      metadata: { resolution: 'AUTO_ASSIGN', note: 'Auto-unblocked on assignee assignment' },
+    }).catch(err => console.error('[SLA] auto-unblock log failed:', err));
+
+    // Notify the new assignee
+    createNotification({
+      userId: assigneeId,
+      type: 'TASK_ASSIGNED',
+      title: 'Task assigned & unblocked',
+      message: `"${updatedTask.title}" in ${updatedTask.project?.name} is now active — you're good to start`,
+      metadata: { taskId, projectId: task.projectId },
+      url: `/projects/${task.projectId}/tasks/${taskId}`,
+    });
+
+    // Notify PMs and admins
+    const pmAdminIds = [
+      ...(task.project?.workspace?.members || []).filter(m => m.role === 'ADMIN').map(m => m.userId),
+      ...(task.project?.members || []).filter(m => m.role === 'OWNER' || m.role === 'MANAGER').map(m => m.userId),
+    ].filter(id => id && id !== userId && id !== assigneeId);
+    createBulkNotifications([...new Set(pmAdminIds)], {
+      type: 'TASK_UPDATED',
+      title: 'Task auto-unblocked',
+      message: `"${updatedTask.title}" is now IN_PROGRESS — assignee set`,
+      metadata: { taskId, projectId: task.projectId },
+      url: `/projects/${task.projectId}/tasks/${taskId}`,
+    });
+
+    // Fire Inngest so the existing blocker.resolved email job sends to assignee
+    inngest.send({
+      name: 'follo/blocker.resolved',
+      data: {
+        taskId,
+        taskTitle:     updatedTask.title,
+        projectId:     updatedTask.projectId,
+        projectName:   updatedTask.project?.name,
+        assigneeId,
+        assigneeName:  updatedTask.assignee?.name,
+        assigneeEmail: updatedTask.assignee?.email,
+        resolution:    'AUTO_ASSIGN',
+        note:          'Task auto-unblocked when assignee was set',
+      },
+    }).catch(err => console.error('[Inngest] auto-unblock event failed:', err));
   }
 
   invalidateCache(`task:${taskId}`);

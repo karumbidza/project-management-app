@@ -480,7 +480,7 @@ const TaskDetails = () => {
                 taskData: data,
                 getToken,
             })).unwrap();
-            fetchTaskDetails();
+            fetchTaskDetails({ silent: true });
             toast.success('Task updated');
         } catch (err) {
             toast.error(err?.message || err || 'Failed to update task');
@@ -891,7 +891,6 @@ const TaskDetails = () => {
                     denyExtensionReason={denyExtensionReason} setDenyExtensionReason={setDenyExtensionReason}
                 />
                 )}
-                <ProjectInfoCard project={project} task={task} userId={user?.id} />
             </div>
             </div>
         </div>

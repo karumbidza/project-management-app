@@ -517,6 +517,52 @@ export const getDashboardHistory = asyncHandler(async (req, res) => {
   return sendSuccess(res, events);
 });
 
+// FOLLO ACCESS-SEC — PATCH /api/v1/workspaces/:workspaceId/members/:userId/role
+export const updateWorkspaceMemberRole = asyncHandler(async (req, res) => {
+  const { userId: callerId } = await req.auth();
+  const { workspaceId, userId: targetUserId } = req.params;
+  const { role } = req.body;
+
+  if (!role) throw new ValidationError('role is required');
+
+  const normalizedRole = String(role).toUpperCase();
+  const validRoles = Object.values(WORKSPACE_ROLES);
+  if (!validRoles.includes(normalizedRole)) {
+    throw new ValidationError(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+  }
+
+  // Caller must be admin
+  const callerMembership = await prisma.workspaceMember.findUnique({
+    where:  { userId_workspaceId: { userId: callerId, workspaceId } },
+    select: { role: true },
+  });
+  if (!callerMembership || callerMembership.role !== WORKSPACE_ROLES.ADMIN) {
+    throw new AuthorizationError('Only workspace admins can change member roles', ERROR_CODES.AUTHORIZATION_ERROR);
+  }
+
+  // Cannot change the workspace owner's role
+  const workspace = await prisma.workspace.findUnique({
+    where:  { id: workspaceId },
+    select: { ownerId: true },
+  });
+  if (!workspace) throw new NotFoundError('Workspace not found', ERROR_CODES.NOT_FOUND_ERROR);
+  if (workspace.ownerId === targetUserId) {
+    throw new AuthorizationError("Cannot change the workspace owner's role", ERROR_CODES.AUTHORIZATION_ERROR);
+  }
+
+  const updated = await prisma.workspaceMember.update({
+    where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+    data:  { role: normalizedRole },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+
+  // Invalidate caches for affected user
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(targetUserId));
+  invalidateCachePattern(CACHE_KEYS.userProjects(targetUserId));
+
+  sendSuccess(res, updated, 'Member role updated');
+});
+
 // FOLLO ACCESS-SEC — GET /api/v1/workspaces/:workspaceId/my-role
 export const getMyRole = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();

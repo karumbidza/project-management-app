@@ -189,6 +189,19 @@ export async function approveTask(taskId, userId) {
     });
   }
 
+  // Notify all other project members — task done is project-wide news
+  const otherMemberIds = (task.project?.members || [])
+    .map(m => m.userId)
+    .filter(id => id !== userId && id !== task.assigneeId);
+  if (otherMemberIds.length > 0) {
+    createBulkNotifications([...new Set(otherMemberIds)], {
+      type: 'TASK_APPROVED', title: 'Task completed',
+      message: `"${updated.title}" approved ${timeMsg} in ${updated.project?.name || 'your project'}`,
+      metadata: { taskId, projectId: updated.projectId },
+      url: `/projects/${updated.projectId}/tasks/${taskId}`,
+    });
+  }
+
   await inngest.send({
     name: 'follo/task.approved',
     data: {
@@ -313,8 +326,9 @@ export async function raiseBlocker(taskId, userId, body) {
   commentContent += `\nSLA clock paused ⏸️`;
   await slaRepo.createSystemComment(taskId, commentContent, userId);
 
+  // Notify PMs/admins (priority alert)
   const pmAdminIds = [
-    ...updated.project?.workspace?.members?.filter(m => m.role === 'ADMIN').map(m => m.userId) || [],
+    ...task.project?.workspace?.members?.filter(m => m.role === 'ADMIN').map(m => m.userId) || [],
     ...task.project.members.filter(m => m.role === 'OWNER' || m.role === 'MANAGER').map(m => m.userId) || [],
   ].filter(id => id !== userId);
   createBulkNotifications([...new Set(pmAdminIds)], {
@@ -323,6 +337,19 @@ export async function raiseBlocker(taskId, userId, body) {
     metadata: { taskId, projectId: updated.projectId, description: description.trim() },
     url: `/projects/${updated.projectId}/tasks/${taskId}`,
   });
+
+  // Notify all other project members so everyone knows this task is blocked
+  const allMemberIds = (task.project?.members || [])
+    .map(m => m.userId)
+    .filter(id => id !== userId && !pmAdminIds.includes(id));
+  if (allMemberIds.length > 0) {
+    createBulkNotifications([...new Set(allMemberIds)], {
+      type: 'TASK_UPDATED', title: 'Task blocked',
+      message: `"${updated.title}" has an active blocker in ${updated.project?.name || 'your project'}`,
+      metadata: { taskId, projectId: updated.projectId },
+      url: `/projects/${updated.projectId}/tasks/${taskId}`,
+    });
+  }
 
   await inngest.send({
     name: 'follo/blocker.raised',
@@ -404,6 +431,29 @@ export async function resolveBlocker(taskId, userId, body) {
     `✅ [System] Blocker resolved by @${resolverName}. Resolution: ${resolution}. ${note.trim()}\nSLA clock resumed ▶️`,
     userId
   );
+
+  // Notify assignee in-app
+  if (task.assigneeId) {
+    createNotification({
+      userId: task.assigneeId, type: 'TASK_UPDATED', title: 'Blocker resolved — you\'re unblocked',
+      message: `"${updated.title}" blocker cleared by ${resolverName}. SLA clock resumed.`,
+      metadata: { taskId, projectId: updated.projectId, resolution },
+      url: `/projects/${updated.projectId}/tasks/${taskId}`,
+    });
+  }
+
+  // Notify all project members so everyone knows the task is unblocked
+  const memberIds = (task.project?.members || [])
+    .map(m => m.userId)
+    .filter(id => id !== userId && id !== task.assigneeId);
+  if (memberIds.length > 0) {
+    createBulkNotifications([...new Set(memberIds)], {
+      type: 'TASK_UPDATED', title: 'Task unblocked',
+      message: `"${updated.title}" is now back in progress`,
+      metadata: { taskId, projectId: updated.projectId },
+      url: `/projects/${updated.projectId}/tasks/${taskId}`,
+    });
+  }
 
   await inngest.send({
     name: 'follo/blocker.resolved',

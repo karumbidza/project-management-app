@@ -17,6 +17,7 @@ import {
   getDashboardStats,
   getDashboardHistory,
   getMyRole,
+  updateWorkspaceMemberRole,
 } from "../controllers/workspaceController.js";
 import { validate, createWorkspaceSchema, addWorkspaceMemberSchema } from "../utils/validators.js";
 import { writeLimiter } from "../middlewares/rateLimiter.js";
@@ -43,6 +44,15 @@ workspaceRouter.get("/dashboard/history", getDashboardHistory);
 // GET /api/v1/workspaces/:workspaceId/my-role - Get caller's role in workspace
 // FOLLO ACCESS-SEC — must be before /:workspaceId to avoid route conflict
 workspaceRouter.get("/:workspaceId/my-role", getMyRole);
+
+// PATCH /api/v1/workspaces/:workspaceId/members/:userId/role - Update member role (admin only)
+// FOLLO ACCESS-SEC — must be before /:workspaceId DELETE to avoid route shadowing
+workspaceRouter.patch(
+  "/:workspaceId/members/:userId/role",
+  writeLimiter,
+  requireWorkspaceMembership,
+  updateWorkspaceMemberRole
+);
 
 // DELETE /api/v1/workspaces/:workspaceId - Delete workspace (owner only)
 workspaceRouter.delete("/:workspaceId", writeLimiter, requireWorkspaceMembership, deleteWorkspace);

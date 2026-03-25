@@ -339,18 +339,17 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // FOLLO TESTS — do not bind a port in test mode (supertest uses the app directly)
-if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 5001;
   httpServer.listen(PORT, () => {
     console.info(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 Server running on port ${PORT}
-📍 API: http://localhost:${PORT}/api/v1
-🔌 Socket.IO ready
+Server running on port ${PORT}
+API: http://localhost:${PORT}/api/v1
+Socket.IO ready
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `);
   });
 }
 
-// Export for Vercel serverless
 export default app;

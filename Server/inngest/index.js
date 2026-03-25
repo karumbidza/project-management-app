@@ -1,10 +1,12 @@
 // FOLLO FIX
 // FOLLO SLA
 // FOLLO PERF-2
+// FOLLO ACCESS-SEC
 import prisma from "../configs/prisma.js";
 import emailService from "../utils/emailService.js";
 import { inngest } from "./client.js";
 import { slaFunctions } from "./slaJobs.js";
+import { io } from "../server.js";
 
 // Re-export the shared client so existing imports (`from './inngest/index.js'`) keep working
 export { inngest };
@@ -302,6 +304,44 @@ const syncWorkspaceMemberDeletion = inngest.createFunction(
         },
       },
     });
+
+    // FOLLO ACCESS-SEC — cascade: remove project memberships + unassign open tasks
+    const projects = await prisma.project.findMany({
+      where:  { workspaceId: data.workspace_id },
+      select: { id: true },
+    });
+    const projectIds = projects.map(p => p.id);
+
+    if (projectIds.length > 0) {
+      // Remove all project memberships in this workspace
+      await prisma.projectMember.deleteMany({
+        where: { userId: data.user_id, projectId: { in: projectIds } },
+      });
+
+      // Null-out open task assignments so tasks aren't stuck on a non-member
+      await prisma.task.updateMany({
+        where: {
+          projectId:  { in: projectIds },
+          assigneeId: data.user_id,
+          status:     { notIn: ['DONE', 'BLOCKED'] },
+        },
+        data: { assigneeId: null },
+      });
+    }
+
+    // Notify the client so the removed member is redirected immediately
+    io.emit('permission:revoked', {
+      userId:      data.user_id,
+      workspaceId: data.workspace_id,
+    });
+
+    console.info(JSON.stringify({
+      level:            'info',
+      event:            'inngest.workspace.member.deletion.cascade',
+      userId:           data.user_id,
+      workspaceId:      data.workspace_id,
+      projectsAffected: projectIds.length,
+    }));
   }
 );
 
@@ -485,6 +525,32 @@ const sendOverdueTaskNotifications = inngest.createFunction(
   }
 );
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Cleanup expired invitations daily at 2:00 AM UTC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const cleanupExpiredInvitations = inngest.createFunction(
+  {
+    id:        'follo/cleanup-expired-invitations',
+    name:      'Cleanup Expired Invitations',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '5m' },
+    onFailure: makeFailureHandler('follo/cleanup-expired-invitations'),
+  },
+  { cron: '0 2 * * *' },
+  async () => {
+    const { count } = await prisma.invitation.deleteMany({
+      where: { expiresAt: { lt: new Date() }, status: 'PENDING' },
+    });
+    console.info(JSON.stringify({
+      level: 'info',
+      event: 'inngest.invitations.expired.cleaned',
+      count,
+    }));
+    return { deleted: count };
+  }
+);
+
 export const functions = [
   syncUserCreation,
   syncUserDeletion,
@@ -497,6 +563,8 @@ export const functions = [
   // Scheduled reminders
   sendTaskDueReminders,
   sendOverdueTaskNotifications,
+  // Maintenance
+  cleanupExpiredInvitations,
   // SLA jobs (FOLLO SLA)
   ...slaFunctions,
 ];

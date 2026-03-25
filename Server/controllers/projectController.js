@@ -32,6 +32,7 @@ import {
 import emailService from "../utils/emailService.js";
 import { withCache, invalidateCachePattern, invalidateCache, CACHE_KEYS, CACHE_TTL } from "../lib/cache.js";
 import { userSelect, taskListSelect, memberSelect, projectListSelect } from "../lib/selectShapes.js";
+import { io } from "../server.js";
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // PROJECT CRUD
@@ -805,6 +806,22 @@ export const removeProjectMember = asyncHandler(async (req, res) => {
 
   await prisma.projectMember.delete({ where: { id: memberId } });
 
+  // FOLLO ACCESS-SEC — null-out open task assignments for the removed member
+  await prisma.task.updateMany({
+    where: {
+      projectId:  projectId,
+      assigneeId: targetMember.userId,
+      status:     { notIn: ['DONE', 'BLOCKED'] },
+    },
+    data: { assigneeId: null },
+  });
+
+  // Notify client so the removed member is redirected immediately
+  io.emit('permission:revoked', {
+    userId:    targetMember.userId,
+    projectId,
+  });
+
   // FOLLO INSTANT: Invalidate project member and user project caches
   invalidateCache(CACHE_KEYS.projectMembers(projectId));
   invalidateCachePattern(CACHE_KEYS.userProjects(targetMember.userId));
@@ -862,6 +879,14 @@ export const toggleProjectMember = asyncHandler(async (req, res) => {
     data: { isActive: !targetMember.isActive },
     include: { user: true },
   });
+
+  // If member was just disabled, kick them out of the project in real-time
+  if (!updatedMember.isActive) {
+    io.emit('permission:revoked', {
+      userId:    targetMember.userId,
+      projectId,
+    });
+  }
 
   // FOLLO INSTANT: Invalidate project member and user project caches
   invalidateCache(CACHE_KEYS.projectMembers(projectId));

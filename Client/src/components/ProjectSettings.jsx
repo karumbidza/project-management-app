@@ -8,6 +8,8 @@ import { useAuth } from "@clerk/clerk-react";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { addProjectMemberAsync, toggleProjectMemberAsync, removeProjectMemberAsync, updateProjectMemberRoleAsync, updateProjectAsync } from "../features/workspaceSlice";
+import useUserRole from "../hooks/useUserRole";
+import NotAuthorised from "./NotAuthorised";
 
 // Helper to safely format date
 const formatDate = (date) => {
@@ -22,8 +24,12 @@ const formatDate = (date) => {
 };
 
 export default function ProjectSettings({ project }) {
+    const { isMemberView } = useUserRole();
     const dispatch = useDispatch();
     const { getToken } = useAuth();
+
+    // FOLLO ACCESS-SEC: failsafe — members must never reach settings regardless of URL
+    if (isMemberView) return <NotAuthorised />;
     const [searchParams] = useSearchParams();
     const projectId = searchParams.get('id');
 

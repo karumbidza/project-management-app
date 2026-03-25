@@ -113,13 +113,13 @@ export async function requireProjectAccess(userId, projectId) {
     };
   }
 
-  // Check if user is project member
+  // Check if user is an active project member (isActive=false = disabled, treat as no access)
   const projectMembership = project.members[0];
-  if (projectMembership) {
-    return { 
-      project, 
-      membership: projectMembership, 
-      role: projectMembership.role 
+  if (projectMembership && projectMembership.isActive !== false) {
+    return {
+      project,
+      membership: projectMembership,
+      role: projectMembership.role
     };
   }
 

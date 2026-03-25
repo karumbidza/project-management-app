@@ -24,14 +24,8 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
         return myProjects.find((p) => p.id === projectId);
     }, [currentWorkspace, myProjects, projectId]);
     
-    const teamMembers = project?.members || [];
-    // FOLLO ASSIGN — show all workspace members, flag who is already on this project
-    const projectMemberIds = new Set(teamMembers.map(m => m.userId || m.user?.id));
-    const allMembers = (currentWorkspace?.members || []).map(m => ({
-        ...m,
-        isProjectMember: projectMemberIds.has(m.userId || m.user?.id),
-    }));
-    const assigneeList = allMembers.length > 0 ? allMembers : teamMembers.map(m => ({ ...m, isProjectMember: true }));
+    // FOLLO ASSIGN — use fetched project members as the assignee list (populated via effect below)
+    const [projectMembers, setProjectMembers] = useState([]);
     const dispatch = useDispatch();
     const { getToken } = useAuth();
 
@@ -53,6 +47,24 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
         document.addEventListener('keydown', h);
         return () => document.removeEventListener('keydown', h);
     }, [showCreateTask, setShowCreateTask]);
+
+    // Fetch existing project members for the assignee dropdown
+    useEffect(() => {
+        if (!projectId || !showCreateTask) return;
+        const loadProjectMembers = async () => {
+            try {
+                const token = await getToken();
+                const res = await fetch(`${API_URL}/api/v1/projects/${projectId}/members`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                const json = await res.json();
+                if (json.success) setProjectMembers(json.data || []);
+            } catch (err) {
+                console.error('[CreateTaskDialog] Member load failed:', err.message);
+            }
+        };
+        loadProjectMembers();
+    }, [projectId, showCreateTask, getToken]);
 
     // Fetch task templates for this workspace
     useEffect(() => {
@@ -187,18 +199,19 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         <label className="text-sm font-medium">Assignee</label>
                         <select value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
                             <option value="">Unassigned</option>
-                            {assigneeList.map((member) => {
+                            {projectMembers.map((member) => {
                                 const uid = member.userId || member.user?.id;
-                                const name = member.user?.name || member.name || member.user?.email || uid;
+                                const name = member.user?.name || member.name || uid;
+                                const email = member.user?.email || '';
                                 return (
                                     <option key={uid} value={uid}>
-                                        {name}{member.isProjectMember ? '' : ' (will be added to project)'}
+                                        {name}{email ? ` — ${email}` : ''}
                                     </option>
                                 );
                             })}
                         </select>
                         <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>
-                            Assigning someone not yet on this project will add them automatically.
+                            The assigned member will receive an email notification.
                         </p>
                     </div>
 
