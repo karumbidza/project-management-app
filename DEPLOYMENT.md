@@ -8,7 +8,8 @@
 
 | Service | URL |
 |---|---|
-| Frontend (Vercel) | https://project-management-app-kohl-one.vercel.app |
+| Frontend (Vercel) | https://retailadmin.co.zw |
+| Frontend (Vercel alt) | https://project-management-app-kohl-one.vercel.app |
 | Backend (Railway) | https://project-management-app-production-d002.up.railway.app |
 | Health check | https://project-management-app-production-d002.up.railway.app/api/v1/health |
 
