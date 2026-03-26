@@ -4,6 +4,14 @@
 **Repo:** Monorepo — `Client/` and `Server/` in the same GitHub repo
 **Auto-deploy:** Both platforms watch `main` — every `git push` deploys automatically.
 
+## Live URLs
+
+| Service | URL |
+|---|---|
+| Frontend (Vercel) | https://project-management-app-kohl-one.vercel.app |
+| Backend (Railway) | https://project-management-app-production-d002.up.railway.app |
+| Health check | https://project-management-app-production-d002.up.railway.app/api/v1/health |
+
 ---
 
 ## Architecture
