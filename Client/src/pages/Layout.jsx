@@ -1,6 +1,7 @@
 // FOLLO ACCESS-SEC
 // FOLLO AUDIT
 // FOLLO AUTH-FIX
+// TASKK BRAND
 // FOLLO FIX
 // FOLLO BUGFIX-REFRESH
 // FOLLO ACCESS
@@ -117,9 +118,22 @@ function Layout() {
     // 2. Second: Clerk loaded, but no user = show sign in/sign up
     if (!user) {
         return (
-            <div className='flex items-center justify-center h-screen bg-white dark:bg-zinc-950'>
+            <div className='flex flex-col items-center justify-center h-screen bg-white dark:bg-zinc-950'>
+                {/* TASKK BRAND — auth pages */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', marginBottom: '28px' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="48" height="48">
+                        <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+                        <rect x="16" y="17" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                        <rect x="32" y="19" width="17" height="5" rx="2" fill="#ffffff"/>
+                        <rect x="16" y="32" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                        <rect x="32" y="34" width="12" height="5" rx="2" fill="#ffffff"/>
+                        <rect x="16" y="47" width="10" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                        <rect x="32" y="47" width="17" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                    </svg>
+                    <span style={{ fontSize: '22px', fontWeight: 600, letterSpacing: '-0.5px', color: 'var(--color-text-primary)' }}>Taskk</span>
+                </div>
                 {inviteEmail ? (
-                    <SignUp 
+                    <SignUp
                         initialValues={{ emailAddress: inviteEmail }}
                         signInUrl="/?mode=signin"
                     />

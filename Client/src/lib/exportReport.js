@@ -121,7 +121,7 @@ export async function exportReportPDF({
 
   // Header band
   drawRect(0, 0, W, 38, C.brand);
-  drawText('FOLLO', ML, 14, { size: 22, color: C.white, bold: true });
+  drawText('TASKK', ML, 14, { size: 22, color: C.white, bold: true }); // TASKK BRAND
   drawText('Project Performance Report', ML, 22, { size: 12, color: C.white });
   drawText(workspaceName || 'Workspace', ML, 30, { size: 9, color: [196, 214, 255] });
   drawText(`Generated: ${fmt(today)}  ·  By: ${generatedBy || 'Admin'}`, MR, 30,
@@ -352,7 +352,7 @@ export async function exportReportPDF({
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
     drawLine(ML, H - 10, MR, C.border);
-    drawText('Follo — Confidential', ML, H - 6, { size: 7, color: C.gray });
+    drawText('Taskk — Confidential', ML, H - 6, { size: 7, color: C.gray }); // TASKK BRAND
     drawText(`Page ${p} of ${totalPages}`, MR, H - 6,
       { size: 7, color: C.gray, align: 'right' });
     drawText(workspaceName || '', W / 2, H - 6,
@@ -360,7 +360,7 @@ export async function exportReportPDF({
   }
 
   // ── SAVE ───────────────────────────────────────────
-  const filename = `${(workspaceName || 'follo')
+  const filename = `${(workspaceName || 'taskk') // TASKK BRAND
     .replace(/\s+/g, '-').toLowerCase()}-report-${
     new Date().toISOString().split('T')[0]
   }.pdf`;

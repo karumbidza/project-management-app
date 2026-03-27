@@ -307,7 +307,7 @@ export default function GanttWidget() {
                 pdf.setPage(i);
                 pdf.setFontSize(8);
                 pdf.setTextColor(150, 150, 150);
-                pdf.text(`Timeline Overview · follo.app · Page ${i} of ${totalPages}`, pageW / 2, pageH - 5, { align: 'center' });
+                pdf.text(`Timeline Overview · taskk · Page ${i} of ${totalPages}`, pageW / 2, pageH - 5, { align: 'center' }); // TASKK BRAND
             }
 
             pdf.save(`gantt-${new Date().toISOString().slice(0, 10)}.pdf`);

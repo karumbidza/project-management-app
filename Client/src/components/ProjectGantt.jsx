@@ -452,7 +452,7 @@ export default function ProjectGantt({ tasks, project }) {
                 pdf.setPage(i);
                 pdf.setFontSize(8);
                 pdf.setTextColor(150, 150, 150);
-                pdf.text(`${projName} · follo.app · Page ${i} of ${totalPages}`, pageW / 2, pageH - 5, { align: 'center' });
+                pdf.text(`${projName} · taskk · Page ${i} of ${totalPages}`, pageW / 2, pageH - 5, { align: 'center' }); // TASKK BRAND
             }
 
             const d2 = new Date().toISOString().split('T')[0];
