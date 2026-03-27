@@ -7,6 +7,7 @@
 // FOLLO CLEAN-NAV
 // FOLLO PROJECT-OVERVIEW
 // FOLLO ROLE-FLASH
+// FOLLO NAV
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -19,7 +20,6 @@ import ApplyTemplateDialog from "../components/ApplyTemplateDialog";
 import ProjectCalendar from "../components/ProjectCalendar";
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectGantt from "../components/ProjectGantt";
-import ProjectOverview from "../components/project/ProjectOverview"; // FOLLO PROJECT-OVERVIEW
 import useUserRole from "../hooks/useUserRole";
 import NotAuthorised from "../components/NotAuthorised";
 import EmptyState from "../components/EmptyState"; // FOLLO ACCESS-UX
@@ -27,8 +27,8 @@ import { fetchWorkspaces, fetchMyProjects } from "../features/workspaceSlice";
 import { addTaskToProject, updateTaskInProject } from "../features/taskSlice";
 import { io as ioClient } from "socket.io-client";
 
+// FOLLO NAV: overview tab removed — admins access overview via /projectOverview standalone page
 const TAB_LABELS = {
-    overview: "Overview", // FOLLO PROJECT-OVERVIEW
     tasks: "Tasks",
     gantt: "Gantt",
     calendar: "Calendar",
@@ -45,13 +45,14 @@ export default function ProjectDetail() {
     const dispatch = useDispatch();
     const { getToken } = useAuth();
     const { user } = useUser();
-    const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject } = useUserRole();
+    const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject, isAdmin } = useUserRole();
 
-    // FOLLO ROLE-FLASH: members must not see Project Overview or Settings (admin-only tabs).
-    // If a member somehow lands on these tabs (e.g. direct URL), silently redirect to tasks.
-    const tab = (isMemberView && (rawTab === 'overview' || rawTab === 'settings')) ? 'tasks' : rawTab;
+    // FOLLO NAV: redirect ?tab=overview to tasks (overview is now a standalone page)
+    // FOLLO ROLE-FLASH: members must not see Settings tab — redirect to tasks.
+    const tab = (rawTab === 'overview' || (isMemberView && rawTab === 'settings')) ? 'tasks' : rawTab;
 
-    // FOLLO ROLE-FLASH: tabs available to the current user
+    // FOLLO ROLE-FLASH / FOLLO NAV: tabs available to the current user
+    // Members see tasks/gantt/calendar; admins see tasks/gantt/calendar/settings (no overview tab)
     const visibleTabs = isMemberView
         ? { tasks: 'Tasks', gantt: 'Gantt', calendar: 'Calendar' }
         : TAB_LABELS;
@@ -156,7 +157,14 @@ export default function ProjectDetail() {
                     </button>
                     <div>
                         <div className="flex items-center gap-3">
-                            <h1 className="text-lg font-medium">{project.name}</h1>
+                            {/* FOLLO NAV: admin/PM clicking project name goes to standalone overview */}
+                            {!isMemberView ? (
+                                <button onClick={() => navigate(`/projectOverview?id=${id}`)} className="text-lg font-medium hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                                    {project.name}
+                                </button>
+                            ) : (
+                                <h1 className="text-lg font-medium">{project.name}</h1>
+                            )}
                             <span className={`px-2 py-0.5 rounded text-[11px] capitalize ${statusColors[project.status]}`}>
                                 {project.status.replace("_", " ")}
                             </span>
@@ -201,9 +209,8 @@ export default function ProjectDetail() {
                 ))}
             </div>
 
-            {/* Content */}
+            {/* Content — FOLLO NAV: overview tab removed, handled by /projectOverview page */}
             <div>
-                {tab === "overview"  && <ProjectOverview project={project} />}
                 {tab === "tasks"     && <ProjectTasks tasks={tasks} projectId={id} />}
                 {tab === "gantt"     && <ProjectGantt tasks={tasks} project={project} />}
                 {tab === "calendar"  && <ProjectCalendar tasks={tasks} />}

@@ -1,5 +1,6 @@
 // FOLLO ACCESS-SEC
 // FOLLO PERF
+// FOLLO NAV
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import Layout from "./pages/Layout";
@@ -16,6 +17,7 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Reports = lazy(() => import("./pages/Reports"));
 const MyTasks = lazy(() => import("./pages/MyTasks"));
 const AccessRevoked = lazy(() => import("./pages/AccessRevoked"));
+const ProjectOverviewPage = lazy(() => import("./pages/ProjectOverviewPage")); // FOLLO NAV
 
 // Loading spinner for lazy-loaded pages
 const PageLoader = () => (
@@ -64,6 +66,11 @@ const App = () => {
                     <Route path="projectsDetail" element={
                         <Suspense fallback={<PageLoader />}>
                             <ProjectDetails />
+                        </Suspense>
+                    } />
+                    <Route path="projectOverview" element={
+                        <Suspense fallback={<PageLoader />}>
+                            <ProjectOverviewPage />
                         </Suspense>
                     } />
                     <Route path="taskDetails" element={
