@@ -563,6 +563,88 @@ export const updateWorkspaceMemberRole = asyncHandler(async (req, res) => {
   sendSuccess(res, updated, 'Member role updated');
 });
 
+/**
+ * Remove a member from a workspace
+ * DELETE /api/v1/workspaces/:workspaceId/members/:userId
+ * Admin/owner only. Cascades to project memberships + task unassignment.
+ */
+export const removeWorkspaceMember = asyncHandler(async (req, res) => {
+  const { userId: callerId } = await req.auth();
+  const { workspaceId, userId: targetUserId } = req.params;
+
+  // Caller must be admin
+  const callerMembership = await prisma.workspaceMember.findUnique({
+    where:  { userId_workspaceId: { userId: callerId, workspaceId } },
+    select: { role: true },
+  });
+  if (!callerMembership || callerMembership.role !== WORKSPACE_ROLES.ADMIN) {
+    throw new AuthorizationError('Only workspace admins can remove members', ERROR_CODES.INSUFFICIENT_PERMISSIONS);
+  }
+
+  // Cannot remove the workspace owner
+  const workspace = await prisma.workspace.findUnique({
+    where:  { id: workspaceId },
+    select: { ownerId: true },
+  });
+  if (!workspace) throw new NotFoundError('Workspace not found', ERROR_CODES.NOT_FOUND_ERROR);
+  if (workspace.ownerId === targetUserId) {
+    throw new AuthorizationError('Cannot remove the workspace owner', ERROR_CODES.AUTHORIZATION_ERROR);
+  }
+
+  // Cannot remove yourself
+  if (callerId === targetUserId) {
+    throw new AuthorizationError('Cannot remove yourself from the workspace', ERROR_CODES.AUTHORIZATION_ERROR);
+  }
+
+  // Confirm target is actually a member
+  const targetMembership = await prisma.workspaceMember.findUnique({
+    where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+  });
+  if (!targetMembership) throw new NotFoundError('Member not found in workspace', ERROR_CODES.NOT_FOUND_ERROR);
+
+  // Get all project IDs in this workspace for cascade
+  const projects = await prisma.project.findMany({
+    where:  { workspaceId },
+    select: { id: true },
+  });
+  const projectIds = projects.map(p => p.id);
+
+  // Cascade: remove project memberships + unassign open tasks
+  if (projectIds.length > 0) {
+    await prisma.projectMember.deleteMany({
+      where: { userId: targetUserId, projectId: { in: projectIds } },
+    });
+    await prisma.task.updateMany({
+      where: {
+        projectId: { in: projectIds },
+        assigneeId: targetUserId,
+        status: { notIn: ['DONE'] },
+      },
+      data: { assigneeId: null },
+    });
+  }
+
+  // Remove workspace membership
+  await prisma.workspaceMember.delete({
+    where: { userId_workspaceId: { userId: targetUserId, workspaceId } },
+  });
+
+  // Invalidate caches
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(targetUserId));
+  invalidateCachePattern(CACHE_KEYS.userProjects(targetUserId));
+  invalidateCachePattern(CACHE_KEYS.userWorkspaces(callerId));
+
+  // Real-time: kick the removed user out immediately
+  const io = req.app.get('io');
+  if (io) {
+    io.emit('permission:revoked', { userId: targetUserId, workspaceId });
+  }
+
+  console.info(JSON.stringify({ level: 'info', event: 'workspace.member.removed', workspaceId, targetUserId, callerId, timestamp: new Date().toISOString() }));
+
+  sendSuccess(res, { userId: targetUserId }, 'Member removed from workspace');
+});
+
 // FOLLO ACCESS-SEC — GET /api/v1/workspaces/:workspaceId/my-role
 export const getMyRole = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();

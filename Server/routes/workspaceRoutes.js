@@ -18,6 +18,7 @@ import {
   getDashboardHistory,
   getMyRole,
   updateWorkspaceMemberRole,
+  removeWorkspaceMember,
 } from "../controllers/workspaceController.js";
 import { validate, createWorkspaceSchema, addWorkspaceMemberSchema } from "../utils/validators.js";
 import { writeLimiter } from "../middlewares/rateLimiter.js";
@@ -52,6 +53,14 @@ workspaceRouter.patch(
   writeLimiter,
   requireWorkspaceMembership,
   updateWorkspaceMemberRole
+);
+
+// DELETE /api/v1/workspaces/:workspaceId/members/:userId - Remove member (admin only)
+workspaceRouter.delete(
+  "/:workspaceId/members/:userId",
+  writeLimiter,
+  requireWorkspaceMembership,
+  removeWorkspaceMember
 );
 
 // DELETE /api/v1/workspaces/:workspaceId - Delete workspace (owner only)

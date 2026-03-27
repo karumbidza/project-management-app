@@ -1,10 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
-import { UsersIcon, Search, UserPlus } from "lucide-react";
+import { UsersIcon, Search, UserPlus, Trash2 } from "lucide-react";
 import InviteMemberDialog from "../components/InviteMemberDialog";
 import { useSelector, useDispatch } from "react-redux";
 import { useUserRole } from "../hooks/useUserRole";
 import { useAuth } from "@clerk/clerk-react";
-import { fetchAllUsersAsync, addWorkspaceMemberAsync } from "../features/workspaceSlice";
+import { fetchAllUsersAsync, addWorkspaceMemberAsync, removeWorkspaceMemberAsync } from "../features/workspaceSlice";
 import toast from "react-hot-toast";
 import { Navigate } from "react-router-dom";
 
@@ -16,6 +16,7 @@ const Team = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [users, setUsers] = useState([]);
+    const [confirmRemoveId, setConfirmRemoveId] = useState(null); // userId pending confirmation
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);
     const allUsers = useSelector((state) => state?.workspace?.allUsers || []);
 
@@ -52,6 +53,22 @@ const Team = () => {
     if (!isAdmin) {
         return <Navigate to="/tasks" replace />;
     }
+
+    const handleRemoveMember = async (userId) => {
+        if (!currentWorkspace) return;
+        try {
+            await dispatch(removeWorkspaceMemberAsync({
+                workspaceId: currentWorkspace.id,
+                userId,
+                getToken,
+            })).unwrap();
+            toast.success('Member removed from workspace');
+            setConfirmRemoveId(null);
+        } catch (error) {
+            toast.error(error || 'Failed to remove member');
+            setConfirmRemoveId(null);
+        }
+    };
 
     const handleQuickAdd = async (userToAdd) => {
         if (!currentWorkspace) return;
@@ -126,10 +143,17 @@ const Team = () => {
                                         <th className="px-6 py-2.5 text-left font-medium text-sm">
                                             Role
                                         </th>
+                                        {canManageMembers && (
+                                            <th className="px-6 py-2.5 text-right font-medium text-sm"></th>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 dark:divide-zinc-800">
-                                    {filteredUsers.map((user) => (
+                                    {filteredUsers.map((user) => {
+                                        const memberId = user.userId || user.user?.id;
+                                        const isOwner = currentWorkspace?.ownerId === memberId;
+                                        const isPending = confirmRemoveId === memberId;
+                                        return (
                                         <tr
                                             key={user.id}
                                             className="hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors"
@@ -148,55 +172,79 @@ const Team = () => {
                                                 {user.user.email}
                                             </td>
                                             <td className="px-6 py-2.5 whitespace-nowrap">
-                                                <span
-                                                    className={`px-2 py-1 text-xs rounded-md ${user.role === "ADMIN"
-                                                            ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
-                                                            : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
-                                                        }`}
-                                                >
-                                                    {user.role || "User"}
+                                                <span className={`px-2 py-1 text-xs rounded-md ${
+                                                    isOwner
+                                                        ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                                                        : user.role === "ADMIN"
+                                                        ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
+                                                        : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
+                                                }`}>
+                                                    {isOwner ? "Owner" : user.role || "User"}
                                                 </span>
                                             </td>
+                                            {canManageMembers && (
+                                                <td className="px-6 py-2.5 whitespace-nowrap text-right">
+                                                    {!isOwner && (
+                                                        isPending ? (
+                                                            <span className="inline-flex items-center gap-2">
+                                                                <span className="text-xs text-gray-500 dark:text-zinc-400">Remove?</span>
+                                                                <button onClick={() => handleRemoveMember(memberId)} className="px-2 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700">Yes</button>
+                                                                <button onClick={() => setConfirmRemoveId(null)} className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 hover:bg-gray-300 dark:hover:bg-zinc-600">No</button>
+                                                            </span>
+                                                        ) : (
+                                                            <button onClick={() => setConfirmRemoveId(memberId)} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
+                                                                <Trash2 className="size-3.5" />
+                                                            </button>
+                                                        )
+                                                    )}
+                                                </td>
+                                            )}
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
 
                         {/* Mobile Cards */}
                         <div className="sm:hidden space-y-3">
-                            {filteredUsers.map((user) => (
-                                <div
-                                    key={user.id}
-                                    className="p-4 border border-gray-200 dark:border-zinc-800 rounded-md bg-white dark:bg-zinc-900"
-                                >
-                                    <div className="flex items-center gap-3 mb-2">
-                                        <img
-                                            src={user.user.image}
-                                            alt={user.user.name}
-                                            className="size-9 rounded-full bg-gray-200 dark:bg-zinc-800"
-                                        />
-                                        <div>
-                                            <p className="font-medium text-gray-900 dark:text-white">
-                                                {user.user?.name || "Unknown User"}
-                                            </p>
-                                            <p className="text-sm text-gray-500 dark:text-zinc-400">
-                                                {user.user.email}
-                                            </p>
+                            {filteredUsers.map((user) => {
+                                const memberId = user.userId || user.user?.id;
+                                const isOwner = currentWorkspace?.ownerId === memberId;
+                                const isPending = confirmRemoveId === memberId;
+                                return (
+                                <div key={user.id} className="p-4 border border-gray-200 dark:border-zinc-800 rounded-md bg-white dark:bg-zinc-900">
+                                    <div className="flex items-center justify-between gap-3 mb-2">
+                                        <div className="flex items-center gap-3">
+                                            <img src={user.user.image} alt={user.user.name} className="size-9 rounded-full bg-gray-200 dark:bg-zinc-800" />
+                                            <div>
+                                                <p className="font-medium text-gray-900 dark:text-white">{user.user?.name || "Unknown User"}</p>
+                                                <p className="text-sm text-gray-500 dark:text-zinc-400">{user.user.email}</p>
+                                            </div>
                                         </div>
+                                        {canManageMembers && !isOwner && (
+                                            isPending ? (
+                                                <span className="inline-flex items-center gap-1">
+                                                    <button onClick={() => handleRemoveMember(memberId)} className="px-2 py-1 text-xs rounded bg-red-600 text-white">Yes</button>
+                                                    <button onClick={() => setConfirmRemoveId(null)} className="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300">No</button>
+                                                </span>
+                                            ) : (
+                                                <button onClick={() => setConfirmRemoveId(memberId)} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10">
+                                                    <Trash2 className="size-3.5" />
+                                                </button>
+                                            )
+                                        )}
                                     </div>
-                                    <div>
-                                        <span
-                                            className={`px-2 py-1 text-xs rounded-md ${user.role === "ADMIN"
-                                                    ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
-                                                    : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
-                                                }`}
-                                        >
-                                            {user.role || "User"}
-                                        </span>
-                                    </div>
+                                    <span className={`px-2 py-1 text-xs rounded-md ${
+                                        isOwner ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                                        : user.role === "ADMIN" ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
+                                        : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
+                                    }`}>
+                                        {isOwner ? "Owner" : user.role || "User"}
+                                    </span>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 )}

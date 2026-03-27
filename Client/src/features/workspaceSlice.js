@@ -82,6 +82,20 @@ export const fetchAllUsersAsync = createAsyncThunk(
     }
 );
 
+export const removeWorkspaceMemberAsync = createAsyncThunk(
+    'workspace/removeWorkspaceMember',
+    async ({ workspaceId, userId, getToken }, { rejectWithValue }) => {
+        try {
+            await apiCall(`${API_V1}/workspaces/${workspaceId}/members/${userId}`, {
+                method: 'DELETE',
+            }, getToken);
+            return { workspaceId, userId };
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
 export const addWorkspaceMemberAsync = createAsyncThunk(
     'workspace/addWorkspaceMember',
     async ({ workspaceId, email, role, getToken }, { rejectWithValue }) => {
@@ -534,6 +548,21 @@ const workspaceSlice = createSlice({
                 state.error = action.payload;
             })
             
+            // ━━━ Remove Workspace Member ━━━
+            .addCase(removeWorkspaceMemberAsync.fulfilled, (state, action) => {
+                const { workspaceId, userId } = action.payload;
+                const removeMember = (members) => (members || []).filter(m => (m.userId || m.user?.id) !== userId);
+                state.workspaces = state.workspaces.map(w =>
+                    w.id === workspaceId ? { ...w, members: removeMember(w.members) } : w
+                );
+                if (state.currentWorkspace?.id === workspaceId) {
+                    state.currentWorkspace.members = removeMember(state.currentWorkspace.members);
+                }
+            })
+            .addCase(removeWorkspaceMemberAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+
             // ━━━ Add Workspace Member ━━━
             .addCase(addWorkspaceMemberAsync.pending, (state) => {
                 state.loadingStates.members = true;
