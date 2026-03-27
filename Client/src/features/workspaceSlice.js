@@ -58,14 +58,16 @@ export const createWorkspaceAsync = createAsyncThunk(
 
 export const deleteWorkspaceAsync = createAsyncThunk(
     'workspace/deleteWorkspace',
-    async ({ workspaceId, getToken }, { rejectWithValue }) => {
+    async ({ workspaceId, getToken }, { rejectWithValue, getState }) => {
+        // Pass current workspace snapshot for rollback on failure
+        const snapshot = getState().workspace.workspaces.find(w => w.id === workspaceId) || null;
         try {
-            const result = await apiCall(`${API_V1}/workspaces/${workspaceId}`, {
+            await apiCall(`${API_V1}/workspaces/${workspaceId}`, {
                 method: 'DELETE',
             }, getToken);
             return { workspaceId };
         } catch (error) {
-            return rejectWithValue(error.message);
+            return rejectWithValue({ message: error.message, snapshot });
         }
     }
 );
@@ -515,14 +517,11 @@ const workspaceSlice = createSlice({
             })
             
             // ━━━ Delete Workspace ━━━
-            .addCase(deleteWorkspaceAsync.pending, (state) => {
+            .addCase(deleteWorkspaceAsync.pending, (state, action) => {
+                // Optimistic: remove immediately so the UI updates at once
+                const workspaceId = action.meta.arg.workspaceId;
                 state.loadingStates.workspaces = true;
-            })
-            .addCase(deleteWorkspaceAsync.fulfilled, (state, action) => {
-                state.loadingStates.workspaces = false;
-                const { workspaceId } = action.payload;
                 state.workspaces = state.workspaces.filter((w) => w.id !== workspaceId);
-                // If deleted workspace was current, switch to first available
                 if (state.currentWorkspace?.id === workspaceId) {
                     state.currentWorkspace = state.workspaces[0] || null;
                     if (state.currentWorkspace) {
@@ -530,23 +529,31 @@ const workspaceSlice = createSlice({
                     } else {
                         localStorage.removeItem("currentWorkspaceId");
                     }
-                }
-                // Clear project data that belonged to the deleted workspace so
-                // stale projects don't surface in member-view after deletion.
-                state.myProjects = state.myProjects.filter(p => p.workspaceId !== workspaceId);
-                if (state.currentProject?.workspaceId === workspaceId) {
                     state.currentProject = null;
                     localStorage.removeItem("currentProjectId");
                 }
-                // FOLLO GLITCH-FIX: stamp a sentinel so any in-flight fetchWorkspaces
-                // (e.g. focus-triggered) resolves with a mismatched requestId and is
-                // discarded — preventing the deleted workspace from being restored.
+                state.myProjects = state.myProjects.filter(p => p.workspaceId !== workspaceId);
                 state._latestWorkspacesRequestId = `deleted-${workspaceId}`;
             })
-            .addCase(deleteWorkspaceAsync.rejected, (state, action) => {
+            .addCase(deleteWorkspaceAsync.fulfilled, (state) => {
                 state.loadingStates.workspaces = false;
-                state.error = action.payload;
+                // Already removed optimistically in .pending — nothing more to do
             })
+            .addCase(deleteWorkspaceAsync.rejected, (state, action) => {
+                // Rollback: restore the workspace if the server call failed
+                state.loadingStates.workspaces = false;
+                const { message, snapshot } = action.payload || {};
+                state.error = message || action.payload;
+                if (snapshot) {
+                    state.workspaces = [...state.workspaces, snapshot];
+                    // Restore currentWorkspace if it was the deleted one
+                    if (!state.currentWorkspace) {
+                        state.currentWorkspace = snapshot;
+                        localStorage.setItem("currentWorkspaceId", snapshot.id);
+                    }
+                }
+            })
+
             
             // ━━━ Remove Workspace Member ━━━
             .addCase(removeWorkspaceMemberAsync.fulfilled, (state, action) => {
