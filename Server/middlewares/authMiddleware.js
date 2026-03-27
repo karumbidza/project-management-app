@@ -27,7 +27,12 @@ const ensureUserInDb = async (userId) => {
                     console.info(JSON.stringify({ level: 'info', event: 'auth.user.migrating', userId, timestamp: new Date().toISOString() }));
                     
                     // Update all relations to use new user ID
+                    // Update User.id first so FK constraints are satisfied
                     await prisma.$transaction([
+                        prisma.user.update({
+                            where: { id: existingUser.id },
+                            data: { id: userId, name, image }
+                        }),
                         prisma.workspaceMember.updateMany({
                             where: { userId: existingUser.id },
                             data: { userId: userId }
@@ -60,11 +65,6 @@ const ensureUserInDb = async (userId) => {
                             where: { invitedById: existingUser.id },
                             data: { invitedById: userId }
                         }),
-                        // Finally update the user ID itself
-                        prisma.user.update({
-                            where: { id: existingUser.id },
-                            data: { id: userId, name, image }
-                        })
                     ]);
                     
                     user = await prisma.user.findUnique({ where: { id: userId } });
