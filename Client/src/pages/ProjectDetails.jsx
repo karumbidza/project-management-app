@@ -45,7 +45,7 @@ export default function ProjectDetail() {
     const dispatch = useDispatch();
     const { getToken } = useAuth();
     const { user } = useUser();
-    const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject, isAdmin } = useUserRole();
+    const { isMemberView, canCreateTasks, canManageTemplates, canApproveReject } = useUserRole();
 
     // FOLLO NAV: redirect ?tab=overview to tasks (overview is now a standalone page)
     // FOLLO ROLE-FLASH: members must not see Settings tab — redirect to tasks.
@@ -157,14 +157,7 @@ export default function ProjectDetail() {
                     </button>
                     <div>
                         <div className="flex items-center gap-3">
-                            {/* FOLLO NAV: admin/PM clicking project name goes to standalone overview */}
-                            {!isMemberView ? (
-                                <button onClick={() => navigate(`/projectOverview?id=${id}`)} className="text-lg font-medium hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
-                                    {project.name}
-                                </button>
-                            ) : (
-                                <h1 className="text-lg font-medium">{project.name}</h1>
-                            )}
+                            <h1 className="text-lg font-medium">{project.name}</h1>
                             <span className={`px-2 py-0.5 rounded text-[11px] capitalize ${statusColors[project.status]}`}>
                                 {project.status.replace("_", " ")}
                             </span>

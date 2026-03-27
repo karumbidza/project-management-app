@@ -1,4 +1,5 @@
 // FOLLO FIX
+// TASKK BRAND
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Plus, Building2 } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
@@ -56,9 +57,16 @@ function WorkspaceDropdown() {
                     {currentWorkspace?.image_url ? (
                         <img src={currentWorkspace.image_url} alt={currentWorkspace?.name} className="w-8 h-8 rounded shadow" />
                     ) : (
-                        <div className="w-8 h-8 rounded shadow bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                            <Building2 className="w-4 h-4 text-white" />
-                        </div>
+                        /* TASKK BRAND — workspace fallback icon */
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="32" height="32" style={{ flexShrink: 0, borderRadius: 6 }}>
+                            <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+                            <rect x="16" y="17" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                            <rect x="32" y="19" width="17" height="5" rx="2" fill="#ffffff"/>
+                            <rect x="16" y="32" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                            <rect x="32" y="34" width="12" height="5" rx="2" fill="#ffffff"/>
+                            <rect x="16" y="47" width="10" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                            <rect x="32" y="47" width="17" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                        </svg>
                     )}
                     <div className="min-w-0 flex-1">
                         <p className="font-semibold text-gray-800 dark:text-white text-sm truncate">
@@ -92,9 +100,15 @@ function WorkspaceDropdown() {
                                     {ws.image_url ? (
                                         <img src={ws.image_url} alt={ws.name} className="w-6 h-6 rounded" />
                                     ) : (
-                                        <div className="w-6 h-6 rounded bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                                            <Building2 className="w-3 h-3 text-white" />
-                                        </div>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" style={{ flexShrink: 0, borderRadius: 4 }}>
+                                            <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+                                            <rect x="16" y="17" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                                            <rect x="32" y="19" width="17" height="5" rx="2" fill="#ffffff"/>
+                                            <rect x="16" y="32" width="10" height="10" rx="2.5" fill="#ffffff"/>
+                                            <rect x="32" y="34" width="12" height="5" rx="2" fill="#ffffff"/>
+                                            <rect x="16" y="47" width="10" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                                            <rect x="32" y="47" width="17" height="5" rx="2" fill="rgba(255,255,255,0.28)"/>
+                                        </svg>
                                     )}
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium text-gray-800 dark:text-white truncate">{ws.name}</p>
