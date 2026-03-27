@@ -434,8 +434,9 @@ export default function Projects() {
                                         {' · '}{rightStats.total} task{rightStats.total !== 1 ? 's' : ''}
                                     </div>
                                 </div>
+                                {/* FOLLO NAV: open full view → goes to standalone project overview page */}
                                 <button
-                                    onClick={() => navigate(`/projectsDetail?id=${selectedProject.id}&tab=tasks`)}
+                                    onClick={() => navigate(`/projectOverview?id=${selectedProject.id}`)}
                                     style={{
                                         padding: '8px 18px', fontSize: '13px',
                                         borderRadius: '20px', border: 'none',

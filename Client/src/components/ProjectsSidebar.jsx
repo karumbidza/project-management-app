@@ -1,6 +1,6 @@
 // FOLLO NAV
 import { useState } from 'react';
-import { Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { ChevronRightIcon, SettingsIcon, KanbanIcon, CalendarIcon, ArrowRightIcon, GanttChart } from 'lucide-react';
 import { useSelector, shallowEqual } from 'react-redux';
 
@@ -10,7 +10,6 @@ const EMPTY_ARRAY = [];
 const ProjectSidebar = () => {
 
     const location = useLocation();
-    const navigate = useNavigate(); // FOLLO NAV
 
     const [expandedProjects, setExpandedProjects] = useState(new Set());
     const [searchParams] = useSearchParams();
@@ -49,16 +48,12 @@ const ProjectSidebar = () => {
             <div className="space-y-1 px-3">
                 {projects.filter(p => p?.id).map((project) => (
                     <div key={project.id}>
-                        {/* FOLLO NAV: chevron toggles expand; project name navigates to overview */}
-                        <div className="w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors duration-200 text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-white">
-                            <button onClick={() => toggleProject(project.id)} className="shrink-0">
-                                <ChevronRightIcon className={`size-3 text-gray-500 dark:text-zinc-400 transition-transform duration-200 ${expandedProjects.has(project.id) && 'rotate-90'}`} />
-                            </button>
-                            <div className="size-2 rounded-full bg-blue-500 shrink-0" />
-                            <button onClick={() => navigate(`/projectOverview?id=${project.id}`)} className="truncate max-w-40 text-sm text-left flex-1">
-                                {project.name}
-                            </button>
-                        </div>
+                        {/* FOLLO NAV: single button toggles dropdown; navigate via "Open full view" on Projects page */}
+                        <button onClick={() => toggleProject(project.id)} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors duration-200 text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 hover:text-gray-900 dark:hover:text-white">
+                            <ChevronRightIcon className={`size-3 text-gray-500 dark:text-zinc-400 transition-transform duration-200 ${expandedProjects.has(project.id) && 'rotate-90'}`} />
+                            <div className="size-2 rounded-full bg-blue-500" />
+                            <span className="truncate max-w-40 text-sm">{project.name}</span>
+                        </button>
 
                         {expandedProjects.has(project.id) && (
                             <div className="ml-5 mt-1 space-y-1">
