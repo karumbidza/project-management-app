@@ -78,6 +78,11 @@ const App = () => {
                             <TaskDetails />
                         </Suspense>
                     } />
+                    <Route path="task" element={
+                        <Suspense fallback={<PageLoader />}>
+                            <TaskDetails />
+                        </Suspense>
+                    } />
                     <Route path="settings" element={
                         <Suspense fallback={<PageLoader />}>
                             <Settings />
