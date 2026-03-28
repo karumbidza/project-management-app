@@ -609,18 +609,25 @@ const workspaceSlice = createSlice({
             })
             .addCase(createProjectAsync.fulfilled, (state, action) => {
                 // FOLLO INSTANT — preserve tasks from payload (template-seeded projects have pre-created tasks)
+                // FOLLO WS-FIX2 — duplicate guard: a stale re-fetch must never double-add
                 state.loadingStates.projects = false;
+                if (!action.payload) return;
                 const project = { ...action.payload, tasks: action.payload.tasks || [], members: action.payload.members || [] };
                 if (state.currentWorkspace) {
-                    state.currentWorkspace.projects = [...(state.currentWorkspace.projects || []), project];
+                    const wsProjects = state.currentWorkspace.projects || [];
+                    if (!wsProjects.some(p => p.id === project.id)) {
+                        state.currentWorkspace.projects = [...wsProjects, project];
+                    }
                 }
-                state.workspaces = state.workspaces.map((w) =>
-                    w.id === action.payload.workspaceId
-                        ? { ...w, projects: [...(w.projects || []), project] }
-                        : w
-                );
+                state.workspaces = state.workspaces.map((w) => {
+                    if (w.id !== action.payload.workspaceId) return w;
+                    const existing = w.projects || [];
+                    if (existing.some(p => p.id === project.id)) return w;
+                    return { ...w, projects: [...existing, project] };
+                });
                 // FOLLO INSTANT — also update myProjects so member-view shows new project immediately
-                if (state.myProjects.length > 0) {
+                // FOLLO WS-FIX2 — duplicate guard
+                if (!state.myProjects.some(p => p.id === project.id)) {
                     state.myProjects = [...state.myProjects, project];
                 }
             })
@@ -722,9 +729,15 @@ const workspaceSlice = createSlice({
                 state.loadingStates.tasks = true;
             })
             .addCase(createTaskAsync.fulfilled, (state, action) => {
+                // FOLLO WS-FIX2 — duplicate guard: skip if task already in state
                 state.loadingStates.tasks = false;
                 const task = action.payload;
-                const addTask = (p) => p.id === task.projectId ? { ...p, tasks: [...(p.tasks || []), task] } : p;
+                if (!task) return;
+                const addTask = (p) => {
+                    if (p.id !== task.projectId) return p;
+                    if ((p.tasks || []).some(t => t.id === task.id)) return p; // already present
+                    return { ...p, tasks: [...(p.tasks || []), task] };
+                };
                 if (state.currentWorkspace) {
                     state.currentWorkspace.projects = state.currentWorkspace.projects.map(addTask);
                 }

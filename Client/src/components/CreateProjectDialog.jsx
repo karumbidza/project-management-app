@@ -1,11 +1,12 @@
 // FOLLO FIX
 // FOLLO SLA
 // FOLLO GLITCH-FIX
+// FOLLO WS-FIX2
 import { useState, useEffect } from "react";
 import { XIcon, Loader2 } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
-import { createProjectAsync, fetchWorkspaces } from "../features/workspaceSlice";
+import { createProjectAsync } from "../features/workspaceSlice";
 import toast from "react-hot-toast";
 import LoadingButton from "./ui/LoadingButton";
 
@@ -91,11 +92,10 @@ const CreateProjectDialog = ({ isDialogOpen, setIsDialogOpen }) => {
             })).unwrap();
             
             toast.success("Project created successfully!");
+            // FOLLO WS-FIX2: do NOT dispatch fetchWorkspaces here — createProjectAsync.fulfilled
+            // already mutates state directly. A re-fetch here could return stale server data
+            // (cache not yet cleared) and overwrite the just-added project in Redux state.
             setIsDialogOpen(false);
-            // FOLLO GLITCH-FIX: dispatch a fresh fetchWorkspaces so its requestId becomes
-            // the latest. Any in-flight focus-triggered GET (older requestId) will be
-            // discarded by the reducer, preventing it from overwriting the new project.
-            dispatch(fetchWorkspaces(getToken));
             // Reset form
             setFormData({
                 name: "",

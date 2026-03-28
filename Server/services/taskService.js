@@ -4,6 +4,7 @@
 // FOLLO ACCESS
 // FOLLO AUTOSTART
 // FOLLO ASSIGN
+// FOLLO WS-FIX2
 /**
  * Task Service
  * Business logic for tasks, dependencies, comments, and activities.
@@ -86,6 +87,7 @@ const VALID_TRANSITIONS = {
 };
 
 // Invalidate all caches that include task lists for a project/workspace
+// FOLLO WS-FIX2: also bust dashboard caches so stats reflect new/changed tasks
 function invalidateTaskCaches(projectId, workspaceId) {
   invalidateCache(CACHE_KEYS.projectTasks(projectId));
   invalidateCache(CACHE_KEYS.workspaceProjects(workspaceId));
@@ -93,6 +95,8 @@ function invalidateTaskCaches(projectId, workspaceId) {
   // so invalidate all user workspace/project caches by prefix
   invalidateCachePattern('workspaces:');
   invalidateCachePattern('myprojects:');
+  // FOLLO WS-FIX2: bust dashboard stats for this workspace (keyed dashboard:wsId:userId)
+  invalidateCachePattern(`dashboard:${workspaceId}`);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

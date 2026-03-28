@@ -4,6 +4,7 @@
 // FOLLO SLA
 // FOLLO ACCESS
 // FOLLO INSTANT
+// FOLLO WS-FIX2
 /**
  * Project Controller
  * Handles project CRUD and project member management
@@ -374,8 +375,13 @@ export const createProject = asyncHandler(async (req, res) => {
   }
 
   // FOLLO PERF: Invalidate caches
-  invalidateCachePattern(CACHE_KEYS.userWorkspaces(userId));
-  invalidateCachePattern(CACHE_KEYS.workspaceProjects(workspaceId));
+  // FOLLO WS-FIX2: await all invalidations before responding so the next
+  // fetchWorkspaces / fetchMyProjects always returns fresh data with the new project
+  await Promise.all([
+    invalidateCachePattern(CACHE_KEYS.userWorkspaces(userId)),
+    invalidateCachePattern(CACHE_KEYS.userProjects(userId)),
+    invalidateCachePattern(CACHE_KEYS.workspaceProjects(workspaceId)),
+  ]);
 
   sendCreated(res, project, 'Project created successfully');
 });
