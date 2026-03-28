@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import { useOrganizationList, useAuth } from '@clerk/clerk-react';
 import { useDispatch } from 'react-redux';
-import { fetchWorkspaces } from '../features/workspaceSlice';
+import { addWorkspace } from '../features/workspaceSlice';
 import toast from 'react-hot-toast';
 import LoadingButton from './ui/LoadingButton';
 
@@ -49,19 +49,19 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
                     image_url: organization.imageUrl,
                 }),
             });
+            const syncBody = await syncRes.json().catch(() => ({}));
             if (!syncRes.ok) {
-                const body = await syncRes.json().catch(() => ({}));
-                throw new Error(body?.error?.message || 'Failed to sync workspace to database');
+                throw new Error(syncBody?.error?.message || 'Failed to sync workspace to database');
             }
-            
+
             // Set this as the active organization
             await setActive({ organization: organization.id });
 
-            // FOLLO INSTANT — prime localStorage so fetchWorkspaces.fulfilled selects the new workspace
-            localStorage.setItem('currentWorkspaceId', organization.id);
-
-            // Refresh workspaces list (pass getToken directly)
-            await dispatch(fetchWorkspaces(getToken));
+            // Add workspace directly to Redux — avoids the race where a focus-triggered
+            // fetchWorkspaces overwrites the sentinel and discards the fresh workspace.
+            const workspace = syncBody?.data || syncBody;
+            localStorage.setItem('currentWorkspaceId', workspace.id || organization.id);
+            dispatch(addWorkspace(workspace));
             
             toast.success('Workspace created successfully!');
             setName('');

@@ -445,7 +445,12 @@ const workspaceSlice = createSlice({
                 }
                 state.loadingStates.workspaces = false;
                 state.roleConfirmed = true; // FOLLO ROLE-FLASH: role is now knowable — unblock sidebar
-                state.workspaces = action.payload || [];
+                const serverList = action.payload || [];
+                // Guard: if currentWorkspace isn't in the server response (Neon DB lag after
+                // a just-created workspace), preserve it so the UI doesn't flicker it away.
+                const serverHasCurrent = !state.currentWorkspace ||
+                    serverList.some(w => w.id === state.currentWorkspace.id);
+                state.workspaces = serverHasCurrent ? serverList : [state.currentWorkspace, ...serverList];
                 
                 // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
                 // Only disable member view if user is ADMIN/OWNER in some workspace.
