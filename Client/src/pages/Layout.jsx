@@ -7,6 +7,7 @@
 // FOLLO ACCESS
 // FOLLO ROLE-FIX
 // FOLLO ROLE-FLASH
+// FOLLO WS-FIX
 import { useState, useEffect, useRef } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
@@ -29,6 +30,9 @@ function Layout() {
     const { getToken, userId } = useAuth()
     const hasFetched = useRef(false)
     const prevUserIdRef = useRef(null)
+    // FOLLO WS-FIX: track last fetch time so focus re-fetches can be rate-limited
+    const lastFetchTime = useRef(0)
+    const FOCUS_REFETCH_COOLDOWN_MS = 30_000 // 30 seconds
     const [searchParams] = useSearchParams()
     const inviteEmail = searchParams.get('invite_email')
     const { subscribeToPush, permission } = useNotifications()
@@ -65,6 +69,8 @@ function Layout() {
             if (!token) return
 
             hasFetched.current = true
+            // FOLLO WS-FIX: stamp time so the focus handler cooldown starts from initial load
+            lastFetchTime.current = Date.now()
 
             try {
                 const [workspacesData, projectsData] = await Promise.all([
@@ -97,9 +103,15 @@ function Layout() {
     }, [isLoaded, userId, dispatch]) // FOLLO BUGFIX-REFRESH: isLoaded in deps ensures Clerk is ready
 
     // FOLLO ACCESS-SEC — re-fetch workspace on tab focus to catch role changes
+    // FOLLO WS-FIX: add 30s cooldown so focus events immediately after workspace
+    // creation (or any recent fetch) don't race against the cache or the just-dispatched
+    // addWorkspace action and potentially wipe newly created workspaces.
     useEffect(() => {
         if (!userId || !getToken) return;
         const handleFocus = () => {
+            const now = Date.now()
+            if (now - lastFetchTime.current < FOCUS_REFETCH_COOLDOWN_MS) return
+            lastFetchTime.current = now
             dispatch(fetchWorkspaces(getToken));
         };
         window.addEventListener('focus', handleFocus);

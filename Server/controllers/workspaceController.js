@@ -6,6 +6,7 @@
 // FOLLO CARD-HISTORY
 // FOLLO GANTT-FINAL
 // FOLLO INSTANT
+// FOLLO WS-FIX
 /**
  * Workspace Controller
  * Handles workspace CRUD and member management
@@ -95,7 +96,8 @@ export const createWorkspace = asyncHandler(async (req, res) => {
   });
 
   // FOLLO PERF: Invalidate user's workspace cache
-  invalidateCachePattern(CACHE_KEYS.userWorkspaces(userId));
+  // FOLLO WS-FIX: await so the cache is cleared before the response is sent
+  await invalidateCachePattern(CACHE_KEYS.userWorkspaces(userId));
 
   sendCreated(res, workspace, 'Workspace created successfully');
 });
@@ -161,8 +163,12 @@ export const syncWorkspace = asyncHandler(async (req, res) => {
     },
   });
 
-  // Invalidate cache so the next GET /workspaces returns the new workspace
-  invalidateCachePattern(CACHE_KEYS.userWorkspaces(ownerId || userId));
+  // FOLLO WS-FIX: Invalidate cache (both workspace list and project list) so the next
+  // fetchWorkspaces returns the new workspace — syncWorkspace creates a member record too.
+  await Promise.all([
+    invalidateCachePattern(CACHE_KEYS.userWorkspaces(ownerId || userId)),
+    invalidateCachePattern(CACHE_KEYS.userProjects(ownerId || userId)),
+  ]);
 
   sendCreated(res, workspace, 'Workspace synced successfully');
 });

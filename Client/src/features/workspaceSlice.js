@@ -8,6 +8,7 @@
 // FOLLO BUGFIX-REFRESH
 // FOLLO ACTION-CARDS
 // FOLLO INSTANT
+// FOLLO WS-FIX
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import { apiCall, API_V1 } from "./apiHelper";
 
@@ -446,22 +447,28 @@ const workspaceSlice = createSlice({
                 state.loadingStates.workspaces = false;
                 state.roleConfirmed = true; // FOLLO ROLE-FLASH: role is now knowable — unblock sidebar
                 const serverList = action.payload || [];
-                // Guard: if currentWorkspace isn't in the server response (Neon DB lag after
-                // a just-created workspace), preserve it so the UI doesn't flicker it away.
-                const serverHasCurrent = !state.currentWorkspace ||
-                    serverList.some(w => w.id === state.currentWorkspace.id);
-                state.workspaces = serverHasCurrent ? serverList : [state.currentWorkspace, ...serverList];
-                
+
+                // FOLLO WS-FIX: Merge server list with any locally-added workspaces that the
+                // server cache might not know about yet (e.g. just created via /sync before the
+                // 120s cache TTL expires). A workspace is "local-only" if it's in Redux state
+                // but absent from the server response. Keep local-only entries at the front so
+                // the user's current selection is never silently wiped by a stale cache hit.
+                const serverIds = new Set(serverList.map((w) => w.id));
+                const localOnly = (state.workspaces ?? []).filter((w) => !serverIds.has(w.id));
+                state.workspaces = [...localOnly, ...serverList];
+
                 // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
                 // Only disable member view if user is ADMIN/OWNER in some workspace.
                 // Non-admin workspace members should stay in member view.
-                
+
+                // FOLLO WS-FIX: Resolve currentWorkspace from the merged list (not just the
+                // server list) so a local-only workspace that was just created is preserved.
                 const savedWorkspaceId = localStorage.getItem("currentWorkspaceId");
-                if (savedWorkspaceId && action.payload?.find(w => w.id === savedWorkspaceId)) {
-                    state.currentWorkspace = action.payload.find(w => w.id === savedWorkspaceId);
-                } else if (action.payload?.length > 0) {
-                    state.currentWorkspace = action.payload[0];
-                    localStorage.setItem("currentWorkspaceId", action.payload[0].id);
+                if (savedWorkspaceId && state.workspaces.find(w => w.id === savedWorkspaceId)) {
+                    state.currentWorkspace = state.workspaces.find(w => w.id === savedWorkspaceId);
+                } else if (state.workspaces.length > 0) {
+                    state.currentWorkspace = state.workspaces[0];
+                    localStorage.setItem("currentWorkspaceId", state.workspaces[0].id);
                 }
             })
             .addCase(fetchWorkspaces.rejected, (state, action) => {
