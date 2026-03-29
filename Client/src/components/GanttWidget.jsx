@@ -2,7 +2,9 @@
 // FOLLO GANTT-2
 // FOLLO GANTT-FINAL
 // FOLLO GANTT-DONE
+// TASKK MOBILE
 import { useMemo, useRef, useEffect, useState } from "react";
+import { useIsMobile } from '../hooks/useIsMobile';
 import { StatusBadge, SmartTimeLabel } from './gantt/GanttHelpers';
 import { getTimeOverdueShort, getTimeLeftShort } from '../lib/timeFormat';
 import { useSelector } from "react-redux";
@@ -37,9 +39,8 @@ function getWeekNum(d) {
     return Math.ceil(((d - start) / 86400000 + start.getDay() + 1) / 7);
 }
 
-const ROW_HEIGHT = 54;   // FOLLO GANTT-DONE: was 40 — needs 3 lines (title + assignee + project)
+// TASKK MOBILE: ROW_HEIGHT and TASK_COL_WIDTH are dynamic (see component body)
 const BAR_HEIGHT = 14;
-const TASK_COL_WIDTH = 160; // FOLLO GANTT-DONE: was 140 — extra room for project name
 
 // ─── GANTT CSS ANIMATIONS ──────────
 const WIDGET_GANTT_STYLE = `
@@ -117,6 +118,10 @@ export default function GanttWidget() {
     const navigate = useNavigate();
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);
     const projects = currentWorkspace?.projects || [];
+    // TASKK MOBILE
+    const { isMobile } = useIsMobile();
+    const ROW_HEIGHT = isMobile ? 44 : 54;
+    const TASK_COL_WIDTH = isMobile ? 110 : 160;
 
     // FOLLO GANTT-DONE — Scale state
     const [scale, setScale] = useState('day');
@@ -352,8 +357,8 @@ export default function GanttWidget() {
                 </h3>
             </div>
 
-            {/* ── FILTER BAR — matches ProjectGantt layout exactly ── */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', flexWrap: 'wrap' }}>
+            {/* ── FILTER BAR — TASKK MOBILE: stacks on mobile ── */}
+            <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 8, padding: '10px 12px', flexWrap: isMobile ? 'nowrap' : 'wrap' }}>
                 {/* Search */}
                 <input
                     type="text"
@@ -415,32 +420,37 @@ export default function GanttWidget() {
                     ))}
                 </div>
 
-                {/* FOLLO GANTT-DONE — PNG download button */}
-                <button
-                    onClick={handleDownloadPNG}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4,
-                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
-                        border: '0.5px solid var(--color-border-secondary, #d4d4d8)',
-                        background: 'transparent', cursor: 'pointer',
-                        color: 'var(--color-text-secondary, #71717a)',
-                    }}
-                >
-                    <Download size={12} /> PNG
-                </button>
+                {/* TASKK MOBILE: hide export buttons on mobile */}
+                {!isMobile && (
+                    <>
+                        {/* FOLLO GANTT-DONE — PNG download button */}
+                        <button
+                            onClick={handleDownloadPNG}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                                border: '0.5px solid var(--color-border-secondary, #d4d4d8)',
+                                background: 'transparent', cursor: 'pointer',
+                                color: 'var(--color-text-secondary, #71717a)',
+                            }}
+                        >
+                            <Download size={12} /> PNG
+                        </button>
 
-                {/* FOLLO GANTT-DONE — PDF download button */}
-                <button
-                    onClick={handleDownloadPDF}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4,
-                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
-                        border: 'none', background: '#2563eb', cursor: 'pointer',
-                        color: '#fff',
-                    }}
-                >
-                    <Download size={12} /> PDF
-                </button>
+                        {/* FOLLO GANTT-DONE — PDF download button */}
+                        <button
+                            onClick={handleDownloadPDF}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                                border: 'none', background: '#2563eb', cursor: 'pointer',
+                                color: '#fff',
+                            }}
+                        >
+                            <Download size={12} /> PDF
+                        </button>
+                    </>
+                )}
             </div>
 
             {/* ── RESULTS SUMMARY ── */}

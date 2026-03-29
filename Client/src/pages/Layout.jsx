@@ -8,10 +8,12 @@
 // FOLLO ROLE-FIX
 // FOLLO ROLE-FLASH
 // FOLLO WS-FIX
+// TASKK MOBILE
 import { useState, useEffect, useRef } from 'react'
 import Navbar from '../components/Navbar'
 import Sidebar from '../components/Sidebar'
 import MemberSidebar from '../components/MemberSidebar'
+import BottomTabBar from '../components/BottomTabBar'
 import AppLoadingSkeleton from '../components/AppLoadingSkeleton'
 import { Outlet, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
@@ -21,9 +23,11 @@ import { fetchNotifications } from '../features/notificationSlice'
 import { Loader2Icon } from 'lucide-react'
 import { SignIn, SignUp, useUser, useAuth } from '@clerk/clerk-react'
 import { useNotifications } from '../hooks/useNotifications'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 function Layout() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+    const { isMobile, isTablet } = useIsMobile()
     const { loadingStates, error, workspaces, currentWorkspace, myProjects, currentProject, isMemberView, roleConfirmed } = useSelector((state) => state.workspace)
     const dispatch = useDispatch()
     const { user, isLoaded } = useUser()
@@ -191,17 +195,26 @@ function Layout() {
 
     return (
         <div className="flex bg-white dark:bg-zinc-950 text-gray-900 dark:text-slate-100">
-            {showMemberView ? (
-                <MemberSidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
-            ) : (
-                <Sidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+            {/* TASKK MOBILE: hide sidebar on mobile, show it on tablet/desktop */}
+            {!isMobile && (
+                showMemberView ? (
+                    <MemberSidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+                ) : (
+                    <Sidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} collapsed={isTablet} />
+                )
             )}
             <div className="flex-1 flex flex-col h-screen">
                 <Navbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} isMemberView={showMemberView} />
-                <div className="flex-1 h-full p-6 xl:p-10 xl:px-16 overflow-y-scroll">
+                {/* TASKK MOBILE: add bottom padding on mobile to clear the tab bar */}
+                <div
+                    className="flex-1 h-full p-6 xl:p-10 xl:px-16 overflow-y-scroll"
+                    style={isMobile ? { paddingBottom: 'calc(64px + env(safe-area-inset-bottom))' } : undefined}
+                >
                     <Outlet context={{ isMemberView: showMemberView }} />
                 </div>
             </div>
+            {/* TASKK MOBILE: bottom tab bar on mobile only */}
+            {isMobile && <BottomTabBar />}
         </div>
     )
 }

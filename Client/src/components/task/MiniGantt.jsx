@@ -2,13 +2,12 @@
 // FOLLO MEMBER-GANTT
 // FOLLO GANTT-FINAL
 // FOLLO GANTT-DONE
+// TASKK MOBILE
 import { useMemo } from 'react';
 import { StatusBadge, SmartTimeLabel } from '../gantt/GanttHelpers';
 import { getTimeOverdueShort, getTimeLeftShort } from '../../lib/timeFormat';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
-// ─── Match ProjectGantt constants ───
-const ROW_HEIGHT = 40;
-const LEFT_COL = 140;
 const BAR_H = 14;
 
 function getTaskBarState(task, today) {
@@ -65,20 +64,24 @@ function getProgressBarColors(state) {
 }
 
 export default function MiniGantt({ tasks }) {
+  const { isMobile } = useIsMobile();
+  const ROW_HEIGHT = isMobile ? 44 : 40;
+  const LEFT_COL = isMobile ? 110 : 140;
+  const DAYS_BEFORE = isMobile ? 2 : 4;
+  const DAYS_AFTER = isMobile ? 5 : 6;
+  const DAYS = DAYS_BEFORE + DAYS_AFTER;
+
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
 
-  // Show 10 days: 4 before today, 6 after
   const windowStart = useMemo(() => {
     const d = new Date(today);
-    d.setDate(d.getDate() - 4);
+    d.setDate(d.getDate() - DAYS_BEFORE);
     return d;
-  }, [today]);
-
-  const DAYS = 10;
+  }, [today, DAYS_BEFORE]);
 
   // Generate date column headers
   const columns = useMemo(() => {

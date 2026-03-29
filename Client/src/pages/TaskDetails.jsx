@@ -6,6 +6,7 @@
 // FOLLO DEPS
 // FOLLO ASSIGN
 // FOLLO TASK-UI
+// TASKK MOBILE
 import { format, parseISO, isValid } from "date-fns";
 import toast from "react-hot-toast";
 import { useSelector, useDispatch } from "react-redux";
@@ -28,6 +29,7 @@ import {
     denyExtensionAsync,
 } from "../features/slaSlice";
 import useUserRole from "../hooks/useUserRole";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { useMediaUpload, MEDIA_LIMITS, detectMediaType } from "../hooks/useMediaUpload";
 import TaskSLABanner from "../components/task/TaskSLABanner";
 import TaskInfoCard from "../components/task/TaskInfoCard";
@@ -63,6 +65,7 @@ const TaskDetails = () => {
     const { getToken } = useAuth();
     const dispatch = useDispatch();
     const { canSubmitTask, canApproveReject, canRaiseBlocker, canResolveBlocker, canAssignTasks } = useUserRole();
+    const { isMobile } = useIsMobile();
     
     const [task, setTask] = useState(null);
     const [project, setProject] = useState(null);
@@ -777,6 +780,26 @@ const TaskDetails = () => {
 
     return (
         <div className="flex flex-col gap-4 max-w-6xl mx-auto">
+            {/* TASKK MOBILE: sticky back-header on mobile */}
+            {isMobile && (
+                <div style={{
+                    position: 'sticky', top: 0, zIndex: 40,
+                    background: 'var(--color-background-primary, #ffffff)',
+                    borderBottom: '0.5px solid var(--color-border-tertiary, #e4e4e7)',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 16px', margin: '-24px -24px 0', // pull to edge of container padding
+                }}>
+                    <button
+                        onClick={() => navigate(-1)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 4, color: 'var(--color-text-secondary, #52525b)' }}
+                    >
+                        ← Back
+                    </button>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text-primary, #18181b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {task?.title}
+                    </span>
+                </div>
+            )}
             {/* FOLLO ACCESS-UX — State 10: viewing task not assigned to current user */}
             {task.assigneeId && task.assigneeId !== user?.id && !canApproveReject && (
                 <div style={{

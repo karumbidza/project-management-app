@@ -4,7 +4,9 @@
 // FOLLO PERMISSIONS
 // FOLLO GANTT-FINAL
 // FOLLO GANTT-DONE
+// TASKK MOBILE
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useIsMobile } from '../hooks/useIsMobile';
 import { StatusBadge, SmartTimeLabel } from './gantt/GanttHelpers';
 import { getTimeOverdueShort, getTimeLeftShort } from '../lib/timeFormat';
 import { calcTaskContribution } from '../lib/completionCalc';
@@ -119,9 +121,8 @@ const PRIORITY_INDICATORS = {
     LOW: "bg-zinc-500",
 };
 
-const ROW_HEIGHT = 54;   // FOLLO GANTT-DONE: matched to GanttWidget (was 46)
+// TASKK MOBILE: ROW_HEIGHT and LEFT_COL are dynamic (see component body)
 const HEADER_H = 44;     // FOLLO GANTT-DONE: matched to GanttWidget (was HEADER_HEIGHT = 40)
-const LEFT_COL = 160;    // FOLLO GANTT-DONE: matched to GanttWidget (was 200)
 const BAR_H = 14;
 const MAX_SPILL_COLS = 5;
 
@@ -170,6 +171,10 @@ export default function ProjectGantt({ tasks, project }) {
     const [selectedTask, setSelectedTask] = useState(null);
     const dragStartRef = useRef(null);
     const { canCreateTasks } = useUserRole();
+    // TASKK MOBILE
+    const { isMobile } = useIsMobile();
+    const ROW_HEIGHT = isMobile ? 44 : 54;
+    const LEFT_COL = isMobile ? 110 : 160;
 
     // FOLLO GANTT-2 — Filter bar state
     const [searchQuery, setSearchQuery] = useState('');
@@ -310,14 +315,77 @@ export default function ProjectGantt({ tasks, project }) {
         e.preventDefault();
         e.stopPropagation();
         const { taskStart, taskEnd } = getTaskPosition(task);
-        dragStartRef.current = { 
-            x: e.clientX, 
+        dragStartRef.current = {
+            x: e.clientX,
             task: { ...task, startDate: taskStart, endDate: taskEnd },
-            type 
+            type
         };
         setDragging({ taskId: task.id, type });
         window.addEventListener("mousemove", handleMouseMove);
         window.addEventListener("mouseup", handleMouseUp);
+    };
+
+    // TASKK MOBILE: Touch drag support (mirrors mouse drag)
+    const handleTouchStart = (e, task, type) => {
+        if (!canCreateTasks) return;
+        if (isTaskLocked(task, taskMap)) return;
+        const touch = e.touches[0];
+        const { taskStart, taskEnd } = getTaskPosition(task);
+        dragStartRef.current = {
+            x: touch.clientX,
+            task: { ...task, startDate: taskStart, endDate: taskEnd },
+            type,
+        };
+        setDragging({ taskId: task.id, type });
+        window.addEventListener('touchmove', handleTouchMove, { passive: false });
+        window.addEventListener('touchend', handleTouchEnd);
+    };
+
+    const handleTouchMove = (e) => {
+        e.preventDefault();
+        if (!dragStartRef.current) return;
+        const touch = e.touches[0];
+        const dx = touch.clientX - dragStartRef.current.x;
+        const daysDelta = Math.round(dx / DAY_WIDTH);
+        if (daysDelta === 0) return;
+        const { task, type } = dragStartRef.current;
+        let newStart = task.startDate;
+        let newEnd = task.endDate;
+        if (type === 'move') {
+            newStart = addDays(task.startDate, daysDelta);
+            newEnd = addDays(task.endDate, daysDelta);
+        } else if (type === 'resize-right') {
+            newEnd = addDays(task.endDate, daysDelta);
+            if (newEnd <= newStart) return;
+        } else if (type === 'resize-left') {
+            newStart = addDays(task.startDate, daysDelta);
+            if (newStart >= newEnd) return;
+        }
+        dragStartRef.current.newStart = newStart;
+        dragStartRef.current.newEnd = newEnd;
+    };
+
+    const handleTouchEnd = async () => {
+        window.removeEventListener('touchmove', handleTouchMove);
+        window.removeEventListener('touchend', handleTouchEnd);
+        if (dragStartRef.current?.newStart || dragStartRef.current?.newEnd) {
+            const { task, newStart, newEnd } = dragStartRef.current;
+            try {
+                await dispatch(updateTaskAsync({
+                    taskId: task.id,
+                    taskData: {
+                        plannedStartDate: newStart?.toISOString(),
+                        plannedEndDate: newEnd?.toISOString(),
+                    },
+                    getToken,
+                })).unwrap();
+                toast.success('Task dates updated');
+            } catch {
+                toast.error('Failed to update task dates');
+            }
+        }
+        dragStartRef.current = null;
+        setDragging(null);
     };
 
     // Handle drag move
@@ -486,8 +554,8 @@ export default function ProjectGantt({ tasks, project }) {
             {/* Inject gantt animations */}
             <style dangerouslySetInnerHTML={{ __html: GANTT_STYLE }} />
 
-            {/* ── FILTER BAR (matches reference exactly) ── */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', flexWrap: 'wrap' }}>
+            {/* ── FILTER BAR — TASKK MOBILE: stacks on mobile ── */}
+            <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 8, padding: '10px 12px', flexWrap: isMobile ? 'nowrap' : 'wrap' }}>
                 {/* Search */}
                 <input
                     type="text"
@@ -539,36 +607,40 @@ export default function ProjectGantt({ tasks, project }) {
                     ))}
                 </div>
 
-                {/* Export buttons */}
-                {/* PNG button — FOLLO GANTT-DONE: transparent bg matching GanttWidget */}
-                <button
-                    onClick={exportPNG}
-                    disabled={exporting}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4,
-                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
-                        border: '0.5px solid var(--color-border-secondary, #d4d4d8)',
-                        background: 'transparent', cursor: 'pointer',
-                        color: 'var(--color-text-secondary, #71717a)',
-                        opacity: exporting ? 0.5 : 1,
-                    }}
-                >
-                    <Download size={12} /> PNG
-                </button>
-                {/* PDF button — FOLLO GANTT-DONE: blue bg, white text, no border */}
-                <button
-                    onClick={exportPDF}
-                    disabled={exporting}
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: 4,
-                        padding: '4px 10px', fontSize: 11, borderRadius: 6,
-                        border: 'none', background: '#2563eb', cursor: 'pointer',
-                        color: '#fff',
-                        opacity: exporting ? 0.5 : 1,
-                    }}
-                >
-                    <Download size={12} /> PDF
-                </button>
+                {/* Export buttons — TASKK MOBILE: hidden on mobile */}
+                {!isMobile && (
+                    <>
+                        {/* PNG button — FOLLO GANTT-DONE: transparent bg matching GanttWidget */}
+                        <button
+                            onClick={exportPNG}
+                            disabled={exporting}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                                border: '0.5px solid var(--color-border-secondary, #d4d4d8)',
+                                background: 'transparent', cursor: 'pointer',
+                                color: 'var(--color-text-secondary, #71717a)',
+                                opacity: exporting ? 0.5 : 1,
+                            }}
+                        >
+                            <Download size={12} /> PNG
+                        </button>
+                        {/* PDF button — FOLLO GANTT-DONE: blue bg, white text, no border */}
+                        <button
+                            onClick={exportPDF}
+                            disabled={exporting}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                padding: '4px 10px', fontSize: 11, borderRadius: 6,
+                                border: 'none', background: '#2563eb', cursor: 'pointer',
+                                color: '#fff',
+                                opacity: exporting ? 0.5 : 1,
+                            }}
+                        >
+                            <Download size={12} /> PDF
+                        </button>
+                    </>
+                )}
             </div>
 
             {/* ── RESULTS SUMMARY ── */}
@@ -591,7 +663,7 @@ export default function ProjectGantt({ tasks, project }) {
                 </div>
             ) : (
 
-            <div ref={scrollRef} className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+            <div ref={scrollRef} className="overflow-x-auto overflow-y-auto" style={{ maxHeight: isMobile ? 'calc(100vh - 200px)' : 'calc(100vh - 260px)' }}>
             <div ref={ganttRef} id="gantt-export-area" style={{ minWidth: totalWidth + LEFT_COL, width: '100%' }}>
 
             {/* ── DATE HEADER (flex: frozen corner + timeline) — FOLLO GANTT-DONE: matches GanttWidget ── */}
@@ -756,13 +828,16 @@ export default function ProjectGantt({ tasks, project }) {
                                         }}
                                         className={isDragging ? 'cursor-grabbing shadow-lg' : ''}
                                         onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, task, 'move'); }}
+                                        onTouchStart={(e) => { e.stopPropagation(); handleTouchStart(e, task, 'move'); }}
                                     >
                                         {!locked && canCreateTasks && (
                                             <>
                                                 <div style={{ position: 'absolute', left: 0, top: 0, width: 6, height: '100%', cursor: 'ew-resize', borderRadius: '3px 0 0 3px' }}
-                                                    onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, task, 'resize-left'); }} />
+                                                    onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, task, 'resize-left'); }}
+                                                    onTouchStart={(e) => { e.stopPropagation(); handleTouchStart(e, task, 'resize-left'); }} />
                                                 <div style={{ position: 'absolute', right: 0, top: 0, width: 6, height: '100%', cursor: 'ew-resize', borderRadius: '0 3px 3px 0' }}
-                                                    onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, task, 'resize-right'); }} />
+                                                    onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, task, 'resize-right'); }}
+                                                    onTouchStart={(e) => { e.stopPropagation(); handleTouchStart(e, task, 'resize-right'); }} />
                                             </>
                                         )}
                                     </div>

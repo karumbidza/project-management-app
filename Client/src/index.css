@@ -1,3 +1,4 @@
+/* TASKK MOBILE */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
 @import "tailwindcss";
 
@@ -94,5 +95,38 @@
 
     input[type="checkbox"]:checked {
         background-color: #3b82f6;
+    }
+}
+
+/* ── TASKK MOBILE: Global mobile fixes ── */
+html, body {
+    overflow-x: hidden;
+}
+
+/* Hide horizontal scrollbar utility */
+.scroll-no-bar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scroll-no-bar::-webkit-scrollbar {
+    display: none;
+}
+
+/* 44px minimum touch targets */
+button, a, [role="button"] {
+    min-height: 44px;
+}
+/* But override for small inline badges/chips that should stay compact */
+.touch-sm {
+    min-height: unset;
+}
+
+/* iOS: prevent zoom on input focus (font-size must be ≥16px) */
+input, select, textarea {
+    font-size: 16px;
+}
+@media (min-width: 768px) {
+    input, select, textarea {
+        font-size: 13px;
     }
 }

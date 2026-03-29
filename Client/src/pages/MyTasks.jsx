@@ -5,6 +5,7 @@
 // FOLLO MEMBER-GANTT
 // FOLLO AUTOSTART
 // FOLLO ACCESS-UX
+// TASKK MOBILE
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { useUser, useAuth } from '@clerk/clerk-react'
@@ -24,6 +25,7 @@ import toast from 'react-hot-toast'
 import useUserRole from '../hooks/useUserRole'
 import { updateTaskAsync } from '../features/taskSlice'
 import MiniGantt from '../components/task/MiniGantt'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 // ─── GANTT CSS ANIMATIONS ──────────
 const GANTT_STYLE = `
@@ -70,6 +72,7 @@ const MyTasks = () => {
     const navigate = useNavigate()
     const { myProjects, currentWorkspace } = useSelector((state) => state.workspace)
     const { canApproveReject, isMemberView } = useUserRole()
+    const { isMobile } = useIsMobile()
     const [searchTerm, setSearchTerm] = useState('')
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [priorityFilter, setPriorityFilter] = useState('ALL')
@@ -350,8 +353,11 @@ const MyTasks = () => {
                 </div>
             )}
 
-            {/* Filters — compact dropdown bar */}
-            <div className="flex items-center gap-3 flex-wrap">
+            {/* Filters — compact dropdown bar; horizontal scroll on mobile */}
+            <div
+                className="flex items-center gap-3"
+                style={isMobile ? { overflowX: 'auto', flexWrap: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none', paddingBottom: 4 } : { flexWrap: 'wrap' }}
+            >
                 {/* Search */}
                 <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
