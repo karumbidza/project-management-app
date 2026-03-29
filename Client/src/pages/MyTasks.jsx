@@ -353,81 +353,118 @@ const MyTasks = () => {
                 </div>
             )}
 
-            {/* Filters — compact dropdown bar; horizontal scroll on mobile */}
-            <div
-                className="flex items-center gap-3"
-                style={isMobile ? { overflowX: 'auto', flexWrap: 'nowrap', scrollbarWidth: 'none', msOverflowStyle: 'none', paddingBottom: 4 } : { flexWrap: 'wrap' }}
-            >
-                {/* Search */}
-                <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-                    <input
-                        type="text"
-                        placeholder="Search tasks…"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-8 pr-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 w-44 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition placeholder:text-zinc-400"
-                    />
+            {/* Filters — horizontal scroll on mobile, wrap on desktop */}
+            <div className="space-y-2">
+                <div
+                    className="flex items-center gap-3"
+                    style={isMobile
+                        ? { overflowX: 'auto', flexWrap: 'nowrap', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch', paddingBottom: 2 }
+                        : { flexWrap: 'wrap' }}
+                >
+                    {/* Search */}
+                    <div className="relative flex-shrink-0">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                        <input
+                            type="text"
+                            placeholder="Search tasks…"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-8 pr-3 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition placeholder:text-zinc-400"
+                            style={{ fontSize: 12, width: isMobile ? 140 : 176 }}
+                        />
+                    </div>
+
+                    {/* Status dropdown */}
+                    <div className="relative flex-shrink-0">
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
+                        >
+                            {STATUS_FILTER_PILLS.map(opt => (
+                                <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Status' : opt.label}</option>
+                            ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
+                    </div>
+
+                    {/* Priority dropdown */}
+                    <div className="relative flex-shrink-0">
+                        <select
+                            value={priorityFilter}
+                            onChange={(e) => setPriorityFilter(e.target.value)}
+                            className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
+                        >
+                            {PRIORITY_FILTER_PILLS.map(opt => (
+                                <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Priority' : opt.label}</option>
+                            ))}
+                        </select>
+                        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
+                    </div>
+
+                    {/* Active filter clear — show inline on desktop, always in second row on mobile */}
+                    {!isMobile && (statusFilter !== 'ALL' || priorityFilter !== 'ALL' || projectFilter !== 'ALL' || searchTerm) && (
+                        <button
+                            onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); setProjectFilter('ALL'); setSearchTerm(''); }}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0"
+                        >
+                            Clear filters
+                        </button>
+                    )}
+
+                    {/* FOLLO ACCESS-UX — State 5: show completed toggle */}
+                    {!isMobile && completedCount > 0 && (
+                        <button
+                            onClick={() => setShowCompleted(prev => !prev)}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg border transition flex-shrink-0 ${
+                                showCompleted
+                                    ? 'bg-zinc-100 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300'
+                                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-400'
+                            }`}
+                        >
+                            {showCompleted ? 'Hide' : 'Show'} completed ({completedCount})
+                        </button>
+                    )}
+
+                    {!isMobile && <div className="flex-1" />}
+                    {!isMobile && (
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                            {sortedTasks.length} of {allTasks.length} tasks
+                            {stats.overdue > 0 && <span className="text-red-500"> · {stats.overdue} overdue</span>}
+                            {stats.blocked > 0 && <span className="text-red-500"> · {stats.blocked} blocked</span>}
+                        </p>
+                    )}
                 </div>
 
-                {/* Status dropdown */}
-                <div className="relative">
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
-                    >
-                        {STATUS_FILTER_PILLS.map(opt => (
-                            <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Status' : opt.label}</option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
-                </div>
-
-                {/* Priority dropdown */}
-                <div className="relative">
-                    <select
-                        value={priorityFilter}
-                        onChange={(e) => setPriorityFilter(e.target.value)}
-                        className="appearance-none pl-3 pr-7 py-1.5 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition"
-                    >
-                        {PRIORITY_FILTER_PILLS.map(opt => (
-                            <option key={opt.key} value={opt.key}>{opt.key === 'ALL' ? 'All Priority' : opt.label}</option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-400 pointer-events-none" />
-                </div>
-
-                {/* Active filter indicators */}
-                {(statusFilter !== 'ALL' || priorityFilter !== 'ALL' || projectFilter !== 'ALL' || searchTerm) && (
-                    <button
-                        onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); setProjectFilter('ALL'); setSearchTerm(''); }}
-                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                    >
-                        Clear filters
-                    </button>
+                {/* Mobile-only second row: toggles + count */}
+                {isMobile && (
+                    <div className="flex items-center gap-3 flex-wrap">
+                        {completedCount > 0 && (
+                            <button
+                                onClick={() => setShowCompleted(prev => !prev)}
+                                className={`text-xs px-2.5 py-1 rounded-lg border transition ${
+                                    showCompleted
+                                        ? 'bg-zinc-100 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300'
+                                        : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400'
+                                }`}
+                            >
+                                {showCompleted ? 'Hide' : 'Show'} done ({completedCount})
+                            </button>
+                        )}
+                        {(statusFilter !== 'ALL' || priorityFilter !== 'ALL' || projectFilter !== 'ALL' || searchTerm) && (
+                            <button
+                                onClick={() => { setStatusFilter('ALL'); setPriorityFilter('ALL'); setProjectFilter('ALL'); setSearchTerm(''); }}
+                                className="text-xs text-blue-600 dark:text-blue-400"
+                            >
+                                Clear filters
+                            </button>
+                        )}
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500 ml-auto">
+                            {sortedTasks.length}/{allTasks.length}
+                            {stats.overdue > 0 && <span className="text-red-500"> · {stats.overdue} overdue</span>}
+                        </p>
+                    </div>
                 )}
-
-                {/* FOLLO ACCESS-UX — State 5: show completed toggle */}
-                {completedCount > 0 && (
-                    <button
-                        onClick={() => setShowCompleted(prev => !prev)}
-                        className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${
-                            showCompleted
-                                ? 'bg-zinc-100 dark:bg-zinc-700 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300'
-                                : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-400'
-                        }`}
-                    >
-                        {showCompleted ? 'Hide' : 'Show'} completed ({completedCount})
-                    </button>
-                )}
-
-                <div className="flex-1" />
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                    {sortedTasks.length} of {allTasks.length} tasks
-                    {stats.overdue > 0 && <span className="text-red-500"> · {stats.overdue} overdue</span>}
-                    {stats.blocked > 0 && <span className="text-red-500"> · {stats.blocked} blocked</span>}
-                </p>
             </div>
 
             {/* FOLLO ACCESS-UX — State 5: All done banner */}
@@ -495,17 +532,18 @@ const MyTasks = () => {
                                     task.status === 'DONE' ? 'opacity-50' : ''
                                 }`}
                             >
-                                <div className="flex items-center justify-between gap-4">
+                                {/* TASKK MOBILE: stack action below on mobile, side-by-side on desktop */}
+                                <div className={isMobile ? 'flex flex-col gap-2' : 'flex items-center justify-between gap-4'}>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                                            <h3 className="font-medium text-gray-900 dark:text-white truncate text-sm">
                                                 {task.title}
                                             </h3>
                                             {isOverdue(task.dueDate) && task.status !== 'DONE' && (
                                                 <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
                                             )}
                                         </div>
-                                        <p className="text-sm text-gray-500 dark:text-zinc-400 truncate mb-2">
+                                        <p className="text-xs text-gray-500 dark:text-zinc-400 truncate mb-2">
                                             {task.projectName}
                                         </p>
                                         <div className="flex flex-wrap items-center gap-2">
@@ -521,7 +559,7 @@ const MyTasks = () => {
                                             {task.dueDate && (
                                                 <span className={`text-xs flex items-center gap-1 ${
                                                     isOverdue(task.dueDate) && task.status !== 'DONE'
-                                                        ? 'text-red-500 font-medium' 
+                                                        ? 'text-red-500 font-medium'
                                                         : 'text-gray-500 dark:text-zinc-400'
                                                 }`}>
                                                     <Clock className="w-3 h-3" />
@@ -531,7 +569,7 @@ const MyTasks = () => {
                                         </div>
                                     </div>
                                     {/* FOLLO ACCESS: Inline action button */}
-                                    <div className="flex-shrink-0">
+                                    <div className={isMobile ? 'flex' : 'flex-shrink-0'}>
                                         {renderActionButton(task)}
                                     </div>
                                 </div>

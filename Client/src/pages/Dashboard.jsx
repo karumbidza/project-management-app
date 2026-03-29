@@ -6,6 +6,7 @@
 // FOLLO GANTT-FINAL
 // FOLLO HEALTH
 // FOLLO ROLE-FLASH
+// TASKK MOBILE
 import { useState, useMemo, useEffect } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { useSelector } from 'react-redux';
@@ -27,6 +28,7 @@ import SlidePanel from '../components/SlidePanel';
 import ActionPanel from '../components/dashboard/ActionPanel';
 import ProjectHealthCard from '../components/dashboard/ProjectHealthCard'; // FOLLO HEALTH
 import useUserRole from '../hooks/useUserRole';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 // ─── Helpers ───────────────────────────────────────
 const safeDate = (d) => {
@@ -48,6 +50,7 @@ const Dashboard = () => {
     const { user } = useUser();
     const navigate = useNavigate();
     const { canCreateProjects, isMemberView, isAdmin } = useUserRole();
+    const { isMobile } = useIsMobile();
 
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [activePanel, setActivePanel] = useState(null);
@@ -198,9 +201,9 @@ const Dashboard = () => {
             </div>
 
             {/* ══════ ROW 1 — ACTION REQUIRED ══════ */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* Pending Approvals */}
-                    <div onClick={() => { setActivePanel(PANELS.APPROVALS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 hover:border-blue-300 dark:hover:border-blue-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.APPROVALS); setPanelMode('active'); }} className="cursor-pointer text-left rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 hover:border-blue-300 dark:hover:border-blue-700 transition group" style={{ padding: isMobile ? '12px' : '16px' }}>
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
                                 <Clock className="size-5 text-blue-600 dark:text-blue-400" />
@@ -209,8 +212,9 @@ const Dashboard = () => {
                         </div>
                         <p className="text-2xl font-bold text-blue-700 dark:text-blue-300">{pendingApprovals.length}</p>
                         <p className="text-xs text-blue-600 dark:text-blue-400">Pending Approvals</p>
-                        <p className="text-[11px] text-blue-500/70 dark:text-blue-500/50 mt-0.5">{pendingApprovals.length} task(s) awaiting your review</p>
+                        {!isMobile && <p className="text-[11px] text-blue-500/70 dark:text-blue-500/50 mt-0.5">{pendingApprovals.length} task(s) awaiting your review</p>}
                         {/* FOLLO CARD-HISTORY */}
+                        {!isMobile && (
                         <div className="mt-2.5 pt-2 border-t border-blue-200/60 dark:border-blue-800/60">
                             <button
                                 onClick={(e) => handleHistoryClick(e, 'approvals-history')}
@@ -220,10 +224,11 @@ const Dashboard = () => {
                                 {counts.approvalsResolvedThisMonth > 0 ? `${counts.approvalsResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
+                        )}
                     </div>
 
                     {/* Active Blockers */}
-                    <div onClick={() => { setActivePanel(PANELS.BLOCKERS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 hover:border-orange-300 dark:hover:border-orange-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.BLOCKERS); setPanelMode('active'); }} className="cursor-pointer text-left rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/20 hover:border-orange-300 dark:hover:border-orange-700 transition group" style={{ padding: isMobile ? '12px' : '16px' }}>
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900/40">
                                 <ShieldAlert className="size-5 text-orange-600 dark:text-orange-400" />
@@ -232,8 +237,9 @@ const Dashboard = () => {
                         </div>
                         <p className="text-2xl font-bold text-orange-700 dark:text-orange-300">{blockedTasks.length}</p>
                         <p className="text-xs text-orange-600 dark:text-orange-400">Active Blockers</p>
-                        <p className="text-[11px] text-orange-500/70 dark:text-orange-500/50 mt-0.5">{blockedTasks.length} task(s) blocked and paused</p>
+                        {!isMobile && <p className="text-[11px] text-orange-500/70 dark:text-orange-500/50 mt-0.5">{blockedTasks.length} task(s) blocked and paused</p>}
                         {/* FOLLO CARD-HISTORY */}
+                        {!isMobile && (
                         <div className="mt-2.5 pt-2 border-t border-orange-200/60 dark:border-orange-800/60">
                             <button
                                 onClick={(e) => handleHistoryClick(e, 'blockers-history')}
@@ -243,10 +249,11 @@ const Dashboard = () => {
                                 {counts.blockersResolvedThisMonth > 0 ? `${counts.blockersResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
+                        )}
                     </div>
 
                     {/* SLA Breaches */}
-                    <div onClick={() => { setActivePanel(PANELS.BREACHES); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 hover:border-red-300 dark:hover:border-red-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.BREACHES); setPanelMode('active'); }} className="cursor-pointer text-left rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 hover:border-red-300 dark:hover:border-red-700 transition group" style={{ padding: isMobile ? '12px' : '16px' }}>
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/40">
                                 <AlertTriangle className="size-5 text-red-600 dark:text-red-400" />
@@ -255,8 +262,9 @@ const Dashboard = () => {
                         </div>
                         <p className="text-2xl font-bold text-red-700 dark:text-red-300">{allOverdueCount}</p>
                         <p className="text-xs text-red-600 dark:text-red-400">SLA Breaches</p>
-                        <p className="text-[11px] text-red-500/70 dark:text-red-500/50 mt-0.5">{allOverdueCount} task(s) past due date</p>
+                        {!isMobile && <p className="text-[11px] text-red-500/70 dark:text-red-500/50 mt-0.5">{allOverdueCount} task(s) past due date</p>}
                         {/* FOLLO CARD-HISTORY */}
+                        {!isMobile && (
                         <div className="mt-2.5 pt-2 border-t border-red-200/60 dark:border-red-800/60">
                             <button
                                 onClick={(e) => handleHistoryClick(e, 'breaches-history')}
@@ -266,10 +274,11 @@ const Dashboard = () => {
                                 {counts.breachesResolvedThisMonth > 0 ? `${counts.breachesResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
+                        )}
                     </div>
 
                     {/* Extension Requests */}
-                    <div onClick={() => { setActivePanel(PANELS.EXTENSIONS); setPanelMode('active'); }} className="cursor-pointer text-left p-4 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 hover:border-amber-300 dark:hover:border-amber-700 transition group">
+                    <div onClick={() => { setActivePanel(PANELS.EXTENSIONS); setPanelMode('active'); }} className="cursor-pointer text-left rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 hover:border-amber-300 dark:hover:border-amber-700 transition group" style={{ padding: isMobile ? '12px' : '16px' }}>
                         <div className="flex items-center justify-between mb-2">
                             <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/40">
                                 <CalendarClock className="size-5 text-amber-600 dark:text-amber-400" />
@@ -278,8 +287,9 @@ const Dashboard = () => {
                         </div>
                         <p className="text-2xl font-bold text-amber-700 dark:text-amber-300">{extensionRequests.length}</p>
                         <p className="text-xs text-amber-600 dark:text-amber-400">Extension Requests</p>
-                        <p className="text-[11px] text-amber-500/70 dark:text-amber-500/50 mt-0.5">{extensionRequests.length} pending approval</p>
+                        {!isMobile && <p className="text-[11px] text-amber-500/70 dark:text-amber-500/50 mt-0.5">{extensionRequests.length} pending approval</p>}
                         {/* FOLLO CARD-HISTORY */}
+                        {!isMobile && (
                         <div className="mt-2.5 pt-2 border-t border-amber-200/60 dark:border-amber-800/60">
                             <button
                                 onClick={(e) => handleHistoryClick(e, 'extensions-history')}
@@ -289,6 +299,7 @@ const Dashboard = () => {
                                 {counts.extensionsResolvedThisMonth > 0 ? `${counts.extensionsResolvedThisMonth} resolved this month →` : 'No activity this month'}
                             </button>
                         </div>
+                        )}
                     </div>
                 </div>
 
@@ -307,7 +318,7 @@ const Dashboard = () => {
                     ) : (
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: `repeat(${Math.min(projects.length, 3)}, minmax(0, 1fr))`,
+                            gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(projects.length, 3)}, minmax(0, 1fr))`,
                             gap: 10,
                             alignItems: 'stretch',
                         }}>
