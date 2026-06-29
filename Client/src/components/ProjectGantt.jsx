@@ -1054,7 +1054,7 @@ export default function ProjectGantt({ tasks, project }) {
                             </div>
                         </div>
                         <button
-                            onClick={() => navigate(`/task?id=${selectedTask.id}`)}
+                            onClick={() => navigate(`/taskDetails?projectId=${project?.id ?? selectedTask.projectId}&taskId=${selectedTask.id}`)}
                             className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 transition"
                         >
                             <ExternalLink className="size-3" />

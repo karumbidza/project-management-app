@@ -572,10 +572,15 @@ export async function requestExtension(taskId, userId, body) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_REQUESTED || 'EXTENSION_REQUESTED', userId, {
-    reason: reason.trim(),
-    proposedDate: proposed.toISOString(),
-    currentDueDate: task.dueDate?.toISOString(),
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_REQUESTED,
+    triggeredBy: userId,
+    metadata: {
+      reason: reason.trim(),
+      proposedDate: proposed.toISOString(),
+      currentDueDate: task.dueDate?.toISOString(),
+    },
   });
 
   const assigneeName = task.assignee?.name || 'Assignee';
@@ -630,9 +635,14 @@ export async function approveExtension(taskId, userId) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_APPROVED || 'EXTENSION_APPROVED', userId, {
-    newDueDate: task.extensionProposedDate?.toISOString(),
-    originalDueDate: task.extensionOriginalDueDate?.toISOString(),
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_APPROVED,
+    triggeredBy: userId,
+    metadata: {
+      newDueDate: task.extensionProposedDate?.toISOString(),
+      originalDueDate: task.extensionOriginalDueDate?.toISOString(),
+    },
   });
 
   const pmUser = await slaRepo.findUserById(userId);
@@ -685,8 +695,13 @@ export async function denyExtension(taskId, userId, body) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_DENIED || 'EXTENSION_DENIED', userId, {
-    reason: reason?.trim() || 'No reason provided',
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_DENIED,
+    triggeredBy: userId,
+    metadata: {
+      reason: reason?.trim() || 'No reason provided',
+    },
   });
 
   const pmUser = await slaRepo.findUserById(userId);

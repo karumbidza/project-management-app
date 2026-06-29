@@ -226,12 +226,19 @@ export const getProjectById = asyncHandler(async (req, res) => {
     throw new NotFoundError('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
   }
 
-  // Check workspace membership OR project membership
-  const isWorkspaceMember = project.workspace.members.some(m => m.userId === userId);
-  const isProjectMember = project.members.some(m => m.userId === userId);
+  // FOLLO SECURITY — align single-project read with requireProjectAccess: the
+  // owner, an ACTIVE project member, or a workspace ADMIN may view it. Plain
+  // (non-admin) workspace members who are not on the project are denied — this
+  // matches getMyProjects (which never surfaces such projects) and closes a
+  // direct-URL IDOR that previously exposed every project's tasks, comment
+  // threads and member emails to any workspace member.
+  const wsMembership = project.workspace.members.find(m => m.userId === userId);
+  const isWorkspaceAdmin = wsMembership?.role === WORKSPACE_ROLES.ADMIN;
+  const projMembership = project.members.find(m => m.userId === userId);
+  const isActiveProjectMember = !!projMembership && projMembership.isActive !== false;
   const isOwner = project.ownerId === userId;
 
-  if (!isWorkspaceMember && !isProjectMember && !isOwner) {
+  if (!isWorkspaceAdmin && !isActiveProjectMember && !isOwner) {
     throw new AuthorizationError(
       'Not authorized to view this project',
       ERROR_CODES.INSUFFICIENT_PERMISSIONS
@@ -939,8 +946,32 @@ export const addPinnedLink = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
   const { label, url, icon } = req.body;
   if (!label?.trim() || !url?.trim()) throw new ValidationError('Label and URL are required');
+
+  // FOLLO SECURITY — only authorized members may pin links (was unprotected).
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: {
+      members: { select: { userId: true } },
+      workspace: { include: { members: { select: { userId: true, role: true } } } },
+    },
+  });
+  if (!project) throw new NotFoundError('Project not found');
+
+  const isProjectMember = project.members.some(m => m.userId === userId);
+  const isWorkspaceAdmin = project.workspace.members.some(m => m.userId === userId && m.role === 'ADMIN');
+  const isOwner = project.ownerId === userId;
+  if (!isProjectMember && !isWorkspaceAdmin && !isOwner) {
+    throw new AuthorizationError('Not authorized to add pinned links');
+  }
+
+  // FOLLO SECURITY — only allow http(s) links (block javascript:, data:, etc.).
+  const trimmedUrl = url.trim();
+  if (!/^https?:\/\//i.test(trimmedUrl)) {
+    throw new ValidationError('Link URL must start with http:// or https://');
+  }
+
   const link = await prisma.projectLink.create({
-    data: { projectId, label: label.trim(), url: url.trim(), icon: icon || null, pinnedBy: userId },
+    data: { projectId, label: label.trim(), url: trimmedUrl, icon: icon || null, pinnedBy: userId },
   });
   return sendCreated(res, link, 'Link added');
 });

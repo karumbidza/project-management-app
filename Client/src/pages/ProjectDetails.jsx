@@ -81,11 +81,20 @@ export default function ProjectDetail() {
 
         const socket = ioClient(
             import.meta.env.VITE_API_URL || 'http://localhost:5001',
-            { withCredentials: true }
+            {
+                withCredentials: true,
+                // FOLLO SECURITY — authenticate the socket with a fresh Clerk JWT
+                // (callback re-runs on every reconnect).
+                auth: async (cb) => {
+                    try { cb({ token: await getToken() }); }
+                    catch { cb({}); }
+                },
+            }
         );
         socketRef.current = socket;
 
-        socket.emit('join_project', id);
+        // Re-join on first connect AND after reconnect.
+        socket.on('connect', () => socket.emit('join_project', id));
 
         socket.on('task_created', ({ task, projectId, createdById }) => {
             if (projectId === id && createdById !== userIdRef.current) {
@@ -110,12 +119,13 @@ export default function ProjectDetail() {
 
         return () => {
             socket.emit('leave_project', id);
+            socket.off('connect');
             socket.off('task_created');
             socket.off('task_updated');
             socket.off('permission:revoked');
             socket.disconnect();
         };
-    }, [id, dispatch]);
+    }, [id, dispatch, getToken]);
 
     const statusColors = {
         PLANNING: "bg-zinc-200 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-200",

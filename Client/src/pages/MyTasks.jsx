@@ -184,7 +184,7 @@ const MyTasks = () => {
         try {
             await dispatch(updateTaskAsync({
                 taskId: task.id,
-                updates: { status: 'IN_PROGRESS' },
+                taskData: { status: 'IN_PROGRESS' },
                 getToken,
             })).unwrap()
             toast.success('Task started')
@@ -209,7 +209,7 @@ const MyTasks = () => {
         try {
             await dispatch(updateTaskAsync({
                 taskId: task.id,
-                updates: { status: 'PENDING_APPROVAL' },
+                taskData: { status: 'PENDING_APPROVAL' },
                 getToken,
             })).unwrap()
             toast.success('Submitted for approval')

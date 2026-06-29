@@ -110,12 +110,12 @@ export const calculateDelay = (task) => {
   const plannedEnd = new Date(task.plannedEndDate);
   const actualEnd = task.actualEndDate ? new Date(task.actualEndDate) : null;
 
-  if (task.status === TASK_STATUS.COMPLETED && actualEnd) {
+  if (task.status === TASK_STATUS.DONE && actualEnd) {
     const delayDays = Math.ceil((actualEnd - plannedEnd) / (1000 * 60 * 60 * 24));
     return { isDelayed: delayDays > 0, delayDays: Math.max(0, delayDays) };
   }
 
-  if (task.status !== TASK_STATUS.COMPLETED && now > plannedEnd) {
+  if (task.status !== TASK_STATUS.DONE && now > plannedEnd) {
     const delayDays = Math.ceil((now - plannedEnd) / (1000 * 60 * 60 * 24));
     return { isDelayed: true, delayDays };
   }
@@ -505,7 +505,7 @@ export async function updateTask(taskId, userId, body) {
     updateData.slaClockStartedAt = now;
   }
 
-  if (status === TASK_STATUS.COMPLETED && !task.actualEndDate && !actualEndDate) {
+  if (status === TASK_STATUS.DONE && !task.actualEndDate && !actualEndDate) {
     updateData.actualEndDate = new Date();
   }
 
@@ -798,6 +798,10 @@ export async function addComment(taskId, userId, body) {
   const comment = await taskRepo.createComment(commentData);
 
   invalidateCache(`task:${taskId}`);
+
+  // FOLLO PERF — broadcast the new comment to everyone viewing the task so it
+  // appears in real time instead of waiting for the next poll.
+  io.to(`project:${task.projectId}`).emit('task_comment_added', { taskId, comment });
 
   // Fire-and-forget side-effects
   const activityMsg = isMediaComment ? `Shared ${commentType.toLowerCase()}` : 'Added a comment';

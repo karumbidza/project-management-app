@@ -39,7 +39,10 @@ import ProjectInfoCard from "../components/task/ProjectInfoCard";
 import TaskDependencies from "../components/TaskDependencies"; // FOLLO DEPS
 import NotAuthorised from "../components/NotAuthorised";
 
-const COMMENT_POLL_INTERVAL = 10000; // 10 seconds
+// FOLLO PERF — comments now arrive in real time via the `task_comment_added`
+// socket event; this poll is only a safety-net fallback, so it runs at a
+// relaxed cadence (was 10s) to cut redundant full-task refetches and jank.
+const COMMENT_POLL_INTERVAL = 30000; // 30 seconds
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -665,9 +668,19 @@ const TaskDetails = () => {
         if (!projectId) return;
         const socket = ioClient(
             import.meta.env.VITE_API_URL || 'http://localhost:5001',
-            { withCredentials: true }
+            {
+                withCredentials: true,
+                // FOLLO SECURITY — authenticate the socket with a fresh Clerk JWT;
+                // the callback re-runs on every (re)connect.
+                auth: async (cb) => {
+                    try { cb({ token: await getTokenRef.current() }); }
+                    catch { cb({}); }
+                },
+            }
         );
-        socket.emit('join_project', projectId);
+        // Re-join on first connect AND after reconnect so a dropped connection
+        // doesn't silently stop delivering updates.
+        socket.on('connect', () => socket.emit('join_project', projectId));
 
         socket.on('task_updated', ({ task: updatedTask, lastUpdatedById }) => {
             if (!updatedTask || updatedTask.id !== taskId) return;
@@ -677,6 +690,20 @@ const TaskDetails = () => {
                 .unwrap()
                 .then(result => setSlaData(result?.sla))
                 .catch(() => {});
+        });
+
+        // FOLLO PERF — real-time comments. Append another user's new comment
+        // instantly (deduped by id). Own comments are handled optimistically on
+        // send, so skip them here to avoid interfering with that flow.
+        socket.on('task_comment_added', ({ taskId: forTaskId, comment }) => {
+            if (forTaskId !== taskId || !comment) return;
+            if (comment.userId === userIdRef.current) return;
+            setTask(prev => {
+                if (!prev) return prev;
+                const existing = prev.comments || [];
+                if (existing.some(c => c.id === comment.id)) return prev;
+                return { ...prev, comments: [...existing, comment] };
+            });
         });
 
         // FOLLO ACCESS-SEC
@@ -691,7 +718,9 @@ const TaskDetails = () => {
 
         return () => {
             socket.emit('leave_project', projectId);
+            socket.off('connect');
             socket.off('task_updated');
+            socket.off('task_comment_added');
             socket.off('task_deleted');
             socket.disconnect();
         };

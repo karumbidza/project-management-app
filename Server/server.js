@@ -20,7 +20,8 @@ import { Server as SocketServer } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
 import 'dotenv/config';
-import { clerkMiddleware } from '@clerk/express';
+import { clerkMiddleware, verifyToken } from '@clerk/express';
+import { requireProjectAccess } from './utils/permissions.js';
 import { serve } from "inngest/express";
 import { inngest, functions } from "./inngest/index.js";
 import { v4 as uuidv4 } from 'uuid';
@@ -67,11 +68,40 @@ export const io = new SocketServer(httpServer, {
 
 app.set('io', io); // FOLLO PROJECT-OVERVIEW — make io available to controllers
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FOLLO SECURITY — Socket.IO authentication
+// Every connection must present a valid Clerk JWT (sent by the client via
+// handshake.auth.token). Without this, any client could join arbitrary
+// project rooms and receive another tenant's real-time task/chat events.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('UNAUTHORIZED'));
+
+    const claims = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+    if (!claims?.sub) return next(new Error('UNAUTHORIZED'));
+
+    socket.userId = claims.sub;
+    return next();
+  } catch {
+    return next(new Error('UNAUTHORIZED'));
+  }
+});
+
 io.on('connection', (socket) => {
-  // Project-level rooms — join when user opens a project
-  socket.on('join_project', (projectId) => {
-    if (typeof projectId === 'string' && projectId.length > 0) {
+  // Project-level rooms — join only after verifying the authenticated user
+  // actually has access to the project (prevents cross-tenant room joins).
+  socket.on('join_project', async (projectId) => {
+    if (typeof projectId !== 'string' || projectId.length === 0) return;
+    try {
+      await requireProjectAccess(socket.userId, projectId);
       socket.join(`project:${projectId}`);
+      socket.emit('join_project_ok', { projectId });
+    } catch {
+      socket.emit('join_project_denied', { projectId });
     }
   });
 
