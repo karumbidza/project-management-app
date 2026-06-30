@@ -16,6 +16,12 @@ export default defineConfig({
       org:       process.env.SENTRY_ORG,
       project:   process.env.SENTRY_PROJECT,
       authToken: process.env.SENTRY_AUTH_TOKEN,
+      // Pin the release name so uploaded source maps associate with the runtime
+      // release (Sentry.init uses import.meta.env.VITE_APP_VERSION). When unset the
+      // plugin falls back to git auto-detection.
+      release:   process.env.VITE_APP_VERSION
+        ? { name: process.env.VITE_APP_VERSION }
+        : undefined,
       // Only upload when auth token is present (skips in dev)
       disable:   !process.env.SENTRY_AUTH_TOKEN,
     }),
