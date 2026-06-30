@@ -504,7 +504,9 @@ model SlaEvent {
     task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
     @@index([taskId])
-    @@index([type])
+    // Composite covers both type-only lookups and type-ordered-by-time scans
+    // (daily-overdue / event-type-by-time queries); replaces the standalone [type].
+    @@index([type, createdAt])
     @@index([createdAt])
     // FOLLO PERF — compound index for ordered events per task
     @@index([taskId, createdAt])

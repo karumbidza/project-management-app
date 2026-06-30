@@ -2,6 +2,10 @@
 // FOLLO SECURITY
 import prisma from "../configs/prisma.js";
 import { clerkClient } from "@clerk/express";
+import { cache } from "../lib/cache.js";
+
+// How long to trust that a user has been synced to our DB before re-checking.
+const USER_SYNC_TTL = 300; // 5 minutes
 
 // Ensure user exists in database when they make any authenticated request
 const ensureUserInDb = async (userId) => {
@@ -104,9 +108,15 @@ export const protect = async (req, res, next) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         
-        // Auto-create user in our database if they don't exist
-        await ensureUserInDb(userId);
-        
+        // Auto-create user in our database if they don't exist. Cache the
+        // "already synced" flag for a few minutes so we don't run a user lookup
+        // on every single authenticated request (one DB round-trip per request).
+        const syncKey = `user-synced:${userId}`;
+        if (!cache.get(syncKey)) {
+            await ensureUserInDb(userId);
+            cache.set(syncKey, true, USER_SYNC_TTL);
+        }
+
         // Attach userId to request for downstream use
         req.userId = userId;
         return next();

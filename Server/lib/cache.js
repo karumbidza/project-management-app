@@ -113,14 +113,36 @@ export function invalidateCache(key) {
 }
 
 /**
- * Invalidate all cache keys matching a prefix (in-memory only)
+ * Delete every Redis key matching a glob pattern via SCAN (Upstash-compatible).
+ * SCAN is cursor-based and non-blocking, unlike KEYS.
+ */
+async function redisScanAndDelete(match) {
+  if (!redis) return;
+  let cursor = '0';
+  do {
+    // Upstash returns [nextCursor, keys]; cursor is a string.
+    const [next, keys] = await redis.scan(cursor, { match, count: 100 });
+    cursor = String(next);
+    if (keys && keys.length > 0) await redis.del(...keys);
+  } while (cursor !== '0');
+}
+
+/**
+ * Invalidate all cache keys matching a prefix — in BOTH the in-memory cache and
+ * Redis. When Redis is active, withCache stores there (not in node-cache), so a
+ * prefix invalidation that only cleared node-cache was a no-op → cross-instance
+ * staleness. Now it SCANs + deletes the matching Redis keys too.
  */
 export function invalidateCachePattern(prefix) {
   const keys = cache.keys().filter(k => k.startsWith(prefix));
   if (keys.length > 0) {
     cache.del(keys);
   }
-  // Note: Redis wildcard deletes require SCAN — not implemented for simplicity
+  if (redis) {
+    redisScanAndDelete(`${prefix}*`).catch(err => console.warn(JSON.stringify({
+      level: 'warn', event: 'cache.redis.pattern.del.failed', prefix, error: err.message,
+    })));
+  }
 }
 
 /**

@@ -146,8 +146,8 @@ export const onTaskSubmitted = inngest.createFunction(
 
     const lateFlag = isLate ? ' ⚠️ SUBMITTED LATE — task is past its due date.' : '';
 
-    for (const { email, name } of recipients) {
-      await emailService.sendTaskDueReminder({
+    await Promise.allSettled(recipients.map(({ email, name }) =>
+      emailService.sendTaskDueReminder({
         to:           email,
         assigneeName: name,
         taskTitle:    `[Approval Needed] ${taskTitle}`,
@@ -155,8 +155,8 @@ export const onTaskSubmitted = inngest.createFunction(
         dueDate:      `Submitted by ${assigneeName}.${lateFlag}`,
       }).catch((err) => console.error(JSON.stringify({
         level: 'error', event: 'sla.submit.email.failed', error: err.message,
-      })));
-    }
+      })))
+    ));
 
     console.info(JSON.stringify({
       level:    'info',
@@ -227,8 +227,8 @@ export const onSlaWarning24hr = inngest.createFunction(
 
     // Notify PMs
     const pms = await getPMAndAdminEmails(task.project.id);
-    for (const { email, name } of pms) {
-      await emailService.sendTaskDueReminder({
+    await Promise.allSettled(pms.map(({ email, name }) =>
+      emailService.sendTaskDueReminder({
         to:           email,
         assigneeName: name,
         taskTitle:    `⚠️ SLA Warning: ${task.title}`,
@@ -236,8 +236,8 @@ export const onSlaWarning24hr = inngest.createFunction(
         dueDate:      `Due in 24 hours — assigned to ${task.assignee?.name || 'unassigned'}`,
       }).catch((err) => console.error(JSON.stringify({
         level: 'error', event: 'sla.warning24h.pm.email.failed', error: err.message,
-      })));
-    }
+      })))
+    ));
 
     console.info(JSON.stringify({
       level:  'info',
@@ -322,8 +322,8 @@ export const onSlaWarning2hr = inngest.createFunction(
 
     // Notify PMs (high urgency)
     const pms = await getPMAndAdminEmails(task.project.id);
-    for (const { email, name } of pms) {
-      await emailService.sendTaskOverdue({
+    await Promise.allSettled(pms.map(({ email, name }) =>
+      emailService.sendTaskOverdue({
         to:           email,
         assigneeName: name,
         taskTitle:    `🔴 URGENT: ${task.title} due in 2 hours`,
@@ -332,8 +332,8 @@ export const onSlaWarning2hr = inngest.createFunction(
         daysOverdue:  0,
       }).catch((err) => console.error(JSON.stringify({
         level: 'error', event: 'sla.warning2h.pm.email.failed', error: err.message,
-      })));
-    }
+      })))
+    ));
 
     console.info(JSON.stringify({
       level:  'info',
@@ -456,8 +456,8 @@ export const onSlaBreach = inngest.createFunction(
     }
 
     const pms = await getPMAndAdminEmails(task.project.id);
-    for (const { email, name } of pms) {
-      await emailService.sendTaskOverdue({
+    await Promise.allSettled(pms.map(({ email, name }) =>
+      emailService.sendTaskOverdue({
         to:           email,
         assigneeName: name,
         taskTitle:    `🔴 SLA BREACHED: ${task.title}`,
@@ -466,14 +466,11 @@ export const onSlaBreach = inngest.createFunction(
         daysOverdue:  1,
       }).catch((err) => console.error(JSON.stringify({
         level: 'error', event: 'sla.breach.pm.email.failed', error: err.message,
-      })));
-    }
+      })))
+    ));
 
-    // Schedule the daily overdue tracker starting tomorrow
-    await inngest.send({
-      name: 'follo/task.sla.overdue.daily',
-      data: { taskId },
-    });
+    // NOTE: per-task daily self-chaining was replaced by a single daily digest
+    // cron (onDailyOverdueDigest) — see below. No per-task chain is scheduled.
 
     console.info(JSON.stringify({
       level:  'info',
@@ -486,26 +483,30 @@ export const onSlaBreach = inngest.createFunction(
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// JOB 5: follo/task.sla.overdue.daily
+// JOB 5: follo/sla-overdue-digest (daily cron — replaces per-task self-chain)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export const onSlaOverdueDaily = inngest.createFunction(
+// Single daily cron that sweeps ALL currently-breached tasks once, instead of a
+// per-task event self-chaining forever (which sent one email per overdue task per
+// day and grew step-count + Resend cost without bound). Updates delayDays + applies
+// the per-day score penalty for each, then sends ONE digest email per PM/admin
+// listing all of that project's overdue tasks.
+export const onDailyOverdueDigest = inngest.createFunction(
   {
-    id:        'follo/sla-overdue-daily',
-    retries:   3,
+    id:        'follo/sla-overdue-digest',
+    name:      'Daily Overdue Digest',
+    retries:   2,
     timeouts:  { start: '30s', finish: '30m' },
-    onFailure: makeFailureHandler('follo/sla-overdue-daily'),
+    onFailure: makeFailureHandler('follo/sla-overdue-digest'),
   },
-  { event: 'follo/task.sla.overdue.daily' },
-  async ({ event, step }) => {
-    const { taskId } = event.data;
-
-    // Wait 24 hours before running (first iteration comes right after breach)
-    await step.sleep('wait-24h', '24h');
-
-    const task = await step.run('check-task', async () => {
-      return prisma.task.findUnique({
-        where: { id: taskId },
+  { cron: '0 8 * * *' },
+  async ({ step }) => {
+    const overdue = await step.run('fetch-overdue', async () => {
+      return prisma.task.findMany({
+        where: {
+          slaStatus: SLA_STATUS.BREACHED,
+          status:    { notIn: ['DONE'] },
+        },
         include: {
           assignee: { select: { id: true, email: true, name: true } },
           project:  { select: { id: true, name: true } },
@@ -513,72 +514,66 @@ export const onSlaOverdueDaily = inngest.createFunction(
       });
     });
 
-    if (!task) return { stopped: true, reason: 'task not found' };
-
-    // Stop if task is now done, pending, blocked (clock re-paused), or resolved
-    if (task.status === 'DONE' ||
-        task.slaStatus === SLA_STATUS.PENDING_APPROVAL ||
-        task.slaStatus === SLA_STATUS.BLOCKED ||
-        task.slaStatus === SLA_STATUS.RESOLVED_ON_TIME ||
-        task.slaStatus === SLA_STATUS.RESOLVED_LATE) {
-      return { stopped: true, reason: `status=${task.status}, sla=${task.slaStatus}` };
+    if (overdue.length === 0) {
+      console.info(JSON.stringify({ level: 'info', event: 'sla.overdue.digest.none' }));
+      return { tasks: 0, digestsSent: 0 };
     }
 
-    const days = overdueDays(task);
-
-    // Stop if the deadline was extended (e.g. a paused interval credited the
-    // dueDate forward) so the task is no longer overdue — the breach timer will
-    // re-fire if/when the new deadline passes.
-    if (days === 0) {
-      return { stopped: true, reason: 'no longer overdue (deadline extended)' };
-    }
-
-    // Increment delayDays
-    await step.run('update-delay', async () => {
-      await prisma.task.update({
-        where: { id: taskId },
-        data:  { delayDays: days, isDelayed: true },
-      });
+    // Update delayDays + per-day score penalty (batched, parallel within a step).
+    await step.run('update-delays-and-scores', async () => {
+      await Promise.allSettled(overdue.map(async (task) => {
+        const days = overdueDays(task);
+        if (days === 0) return;
+        await prisma.task.update({
+          where: { id: task.id },
+          data:  { delayDays: days, isDelayed: true },
+        });
+        if (task.assignee?.id) {
+          await updateContractorScore(prisma, task.assignee.id, task.id, 'BREACH_PER_DAY', { days: 1 });
+        }
+      }));
     });
 
-    // Score penalty per day
-    if (task.assignee?.id) {
-      await step.run('score-penalty', async () => {
-        await updateContractorScore(prisma, task.assignee.id, taskId, 'BREACH_PER_DAY', { days: 1 });
-      });
+    // Group overdue tasks by project, then fan out one digest per recipient.
+    const byProject = new Map();
+    for (const task of overdue) {
+      if (!byProject.has(task.project.id)) byProject.set(task.project.id, { project: task.project, tasks: [] });
+      byProject.get(task.project.id).tasks.push(task);
     }
 
-    // Daily digest to PM + admin only (not assignee)
-    await step.run('notify-pms', async () => {
-      const pms = await getPMAndAdminEmails(task.project.id);
-      for (const { email, name } of pms) {
-        await emailService.sendTaskOverdue({
-          to:           email,
-          assigneeName: name,
-          taskTitle:    `📋 ${task.title} — ${days} day${days !== 1 ? 's' : ''} overdue`,
-          projectName:  task.project.name,
-          dueDate:      formatDate(task.dueDate),
-          daysOverdue:  days,
-        }).catch((err) => console.error(JSON.stringify({
-          level: 'error', event: 'sla.daily.overdue.email.failed', error: err.message,
-        })));
-      }
-    });
-
-    // Re-schedule for tomorrow (chain)
-    await inngest.send({
-      name: 'follo/task.sla.overdue.daily',
-      data: { taskId },
+    const digestsSent = await step.run('send-digests', async () => {
+      let sent = 0;
+      await Promise.allSettled(
+        [...byProject.values()].map(async ({ project, tasks }) => {
+          const recipients = await getPMAndAdminEmails(project.id);
+          const lines = tasks
+            .map((t) => `• ${t.title} — ${overdueDays(t)} day(s) overdue (due ${formatDate(t.dueDate)})`)
+            .join('\n');
+          await Promise.allSettled(recipients.map(({ email, name }) =>
+            emailService.sendTaskOverdue({
+              to:           email,
+              assigneeName: name,
+              taskTitle:    `📋 ${tasks.length} overdue task${tasks.length !== 1 ? 's' : ''} in ${project.name}`,
+              projectName:  project.name,
+              dueDate:      lines,
+              daysOverdue:  tasks.length,
+            }).then(() => { sent++; }).catch((err) => console.error(JSON.stringify({
+              level: 'error', event: 'sla.overdue.digest.email.failed', error: err.message,
+            })))
+          ));
+        })
+      );
+      return sent;
     });
 
     console.info(JSON.stringify({
       level:  'info',
-      event:  'sla.overdue.daily',
-      taskId,
-      title:  task.title,
-      days,
+      event:  'sla.overdue.digest.sent',
+      tasks:  overdue.length,
+      projects: byProject.size,
+      digestsSent,
     }));
-    return { days, continued: true };
+    return { tasks: overdue.length, projects: byProject.size, digestsSent };
   }
 );
 
@@ -1187,6 +1182,74 @@ const onDailyUnassignedCheck = inngest.createFunction(
 );
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// JOB 13: DAILY AUTO-START
+// Persists the auto-start transition for assigned TODO tasks whose planned start
+// date has arrived. Previously this write happened on every getProjectTasks GET;
+// it now runs once a day here (the GET only projects the display status).
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const onDailyAutoStart = inngest.createFunction(
+  {
+    id:        'follo/daily-auto-start',
+    name:      'Daily Auto-Start',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '15m' },
+    onFailure: makeFailureHandler('follo/daily-auto-start'),
+  },
+  { cron: '0 6 * * *' },
+  async ({ step }) => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    const dueTasks = await step.run('fetch-due', async () => {
+      return prisma.task.findMany({
+        where: {
+          status:           'TODO',
+          assigneeId:       { not: null },
+          plannedStartDate: { lte: today },
+        },
+        include: {
+          project:  { select: { id: true, name: true } },
+          assignee: { select: { name: true } },
+        },
+      });
+    });
+
+    let started = 0;
+    for (const task of dueTasks) {
+      await step.run(`start-${task.id}`, async () => {
+        const now = new Date();
+        await prisma.task.update({
+          where: { id: task.id },
+          data:  { status: 'IN_PROGRESS', actualStartDate: now, slaClockStartedAt: now },
+        });
+        await logSlaEvent(prisma, {
+          taskId:      task.id,
+          type:        SLA_EVENT_TYPE.CLOCK_STARTED,
+          triggeredBy: 'SYSTEM',
+        });
+        // Schedule SLA warning/breach timers + notify (same as a manual start).
+        await inngest.send({
+          name: 'follo/task.started',
+          data: {
+            taskId:       task.id,
+            taskTitle:    task.title,
+            projectId:    task.project.id,
+            projectName:  task.project.name,
+            assigneeName: task.assignee?.name,
+            dueDate:      task.dueDate,
+          },
+        });
+      });
+      started++;
+    }
+
+    console.info(JSON.stringify({ level: 'info', event: 'workflow.auto.start.complete', started }));
+    return { started };
+  }
+);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // EXPORT ALL SLA FUNCTIONS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1195,7 +1258,7 @@ export const slaFunctions = [
   onSlaWarning24hr,
   onSlaWarning2hr,
   onSlaBreach,
-  onSlaOverdueDaily,
+  onDailyOverdueDigest,
   onTaskApproved,
   onBlockerRaised,
   onBlockerResolved,
@@ -1203,4 +1266,5 @@ export const slaFunctions = [
   onTaskStartReminder,
   onDailyPriorityRecalc,
   onDailyUnassignedCheck,
+  onDailyAutoStart,
 ];

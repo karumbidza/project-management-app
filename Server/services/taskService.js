@@ -191,49 +191,29 @@ export async function getProjectTasks(projectId, userId) {
 
   const filtered = isManager ? tasks : tasks.filter(t => t.assigneeId === userId);
 
-  // FOLLO AUTOSTART — auto-start TODO tasks whose plannedStartDate has arrived
+  // FOLLO AUTOSTART — a TODO task whose planned start has arrived should APPEAR
+  // started (or blocked, if unassigned). This used to write to the DB on every
+  // GET (writes during a read + cache churn). The actual persistence + SLA events
+  // now happen in daily crons (onDailyAutoStart / onDailyUnassignedCheck); here we
+  // only project the display status so the UI is immediately consistent.
   const todayMs = new Date().setHours(0, 0, 0, 0);
-  const autoStartPromises = filtered
-    .filter(t => t.status === 'TODO' && t.plannedStartDate &&
-      new Date(t.plannedStartDate).setHours(0, 0, 0, 0) <= todayMs)
-    .map(async (t) => {
-      const now = new Date();
+  return filtered.map((task) => {
+    const overrides = autoStartDisplayStatus(task, todayMs);
+    const t = overrides ? { ...task, ...overrides } : task;
+    return { ...t, ...calculateDelay(t) };
+  });
+}
 
-      // Unassigned tasks get auto-blocked instead of auto-started
-      if (!t.assigneeId) {
-        if (t.slaStatus !== 'BLOCKED') {
-          await taskRepo.updateTask(t.id, {
-            status: 'BLOCKED',
-            slaStatus: 'BLOCKED',
-            blockerRaisedAt: now,
-            blockerDescription: 'Task blocked — no assignee',
-            slaClockPausedAt: now,
-          });
-          t.status = 'BLOCKED';
-          t.slaStatus = 'BLOCKED';
-          t.blockerDescription = 'Task blocked — no assignee';
-          logSlaEvent(prisma, { taskId: t.id, type: SLA_EVENT_TYPE.BLOCKER_RAISED, triggeredBy: 'system', metadata: { reason: 'unassigned at start date' } })
-            .catch(err => console.error('[SLA] auto-block logSlaEvent failed:', err));
-        }
-        return;
-      }
-
-      await taskRepo.updateTask(t.id, {
-        status: 'IN_PROGRESS',
-        actualStartDate: now,
-        slaClockStartedAt: now,
-      });
-      t.status = 'IN_PROGRESS';
-      t.actualStartDate = now;
-      logSlaEvent(prisma, { taskId: t.id, type: SLA_EVENT_TYPE.CLOCK_STARTED, triggeredBy: 'system' })
-        .catch(err => console.error('[SLA] auto-start logSlaEvent failed:', err));
-    });
-  if (autoStartPromises.length > 0) {
-    await Promise.all(autoStartPromises);
-    invalidateCache(CACHE_KEYS.projectTasks(projectId));
+// Pure, read-only projection of the auto-start/auto-block status for a TODO task
+// whose planned start date has arrived. Returns display overrides, or null.
+function autoStartDisplayStatus(t, todayMs) {
+  if (t.status !== 'TODO' || !t.plannedStartDate) return null;
+  if (new Date(t.plannedStartDate).setHours(0, 0, 0, 0) > todayMs) return null;
+  if (!t.assigneeId) {
+    if (t.slaStatus === 'BLOCKED') return null;
+    return { status: 'BLOCKED', slaStatus: 'BLOCKED', blockerDescription: 'Task blocked — no assignee' };
   }
-
-  return filtered.map(task => ({ ...task, ...calculateDelay(task) }));
+  return { status: 'IN_PROGRESS' };
 }
 
 export async function getTaskById(taskId, userId) {
