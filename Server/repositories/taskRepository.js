@@ -71,8 +71,8 @@ export const findProjectWithAccessInfo = (projectId) =>
 export const findUserById = (userId) =>
   prisma.user.findUnique({ where: { id: userId } });
 
-export const createTask = (data) =>
-  prisma.task.create({
+export const createTask = (data, client = prisma) =>
+  client.task.create({
     data,
     include: {
       assignee: true,
@@ -130,19 +130,19 @@ export const findTaskWithDependencies = (taskId) =>
     },
   });
 
-export const findPredecessors = (predecessorId) =>
-  prisma.taskDependency.findMany({
+export const findPredecessors = (predecessorId, client = prisma) =>
+  client.taskDependency.findMany({
     where: { successorId: predecessorId },
     select: { predecessorId: true },
   });
 
-export const findExistingDependency = (taskId, predecessorId) =>
-  prisma.taskDependency.findFirst({
+export const findExistingDependency = (taskId, predecessorId, client = prisma) =>
+  client.taskDependency.findFirst({
     where: { successorId: taskId, predecessorId },
   });
 
-export const createDependency = (data) =>
-  prisma.taskDependency.create({
+export const createDependency = (data, client = prisma) =>
+  client.taskDependency.create({
     data,
     include: {
       predecessor: { select: { id: true, title: true, status: true } },
@@ -180,8 +180,8 @@ export const findDistinctCommenters = (taskId, excludeUserId) =>
 // ACTIVITY QUERIES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export const createActivity = (taskId, userId, type, message, oldValue = null, newValue = null) =>
-  prisma.taskActivity.create({
+export const createActivity = (taskId, userId, type, message, oldValue = null, newValue = null, client = prisma) =>
+  client.taskActivity.create({
     data: {
       taskId,
       userId,

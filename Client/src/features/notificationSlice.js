@@ -123,11 +123,24 @@ const notificationSlice = createSlice({
       .addCase(fetchNotifications.fulfilled, (state, action) => {
         state.loading = false;
         const { notifications, unreadCount, nextCursor, append } = action.payload;
-        state.items = append
-          ? [...state.items, ...notifications]
-          : notifications;
+        if (append) {
+          // "Load more": append the older page, de-duping by id.
+          const seen = new Set(state.items.map((i) => i.id));
+          state.items = [...state.items, ...notifications.filter((n) => !seen.has(n.id))];
+          state.nextCursor = nextCursor;
+        } else {
+          // Fresh load / poll: merge the latest first page on top of the existing
+          // list so already-loaded older pages aren't dropped. The fresh copies win
+          // (e.g. read-state changes); order stays newest-first.
+          const wasEmpty = state.items.length === 0;
+          const incomingIds = new Set(notifications.map((n) => n.id));
+          const older = state.items.filter((i) => !incomingIds.has(i.id));
+          state.items = [...notifications, ...older];
+          // Don't let a poll's shallow first-page cursor clobber a deeper "load
+          // more" cursor we already hold.
+          if (wasEmpty) state.nextCursor = nextCursor;
+        }
         state.unreadCount = unreadCount;
-        state.nextCursor = nextCursor;
       })
       .addCase(fetchNotifications.rejected, (state, action) => {
         state.loading = false;

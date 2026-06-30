@@ -123,15 +123,15 @@ export const calculateDelay = (task) => {
   return { isDelayed: false, delayDays: 0 };
 };
 
-const hasCircularDependency = async (taskId, predecessorId, visited = new Set()) => {
+const hasCircularDependency = async (taskId, predecessorId, visited = new Set(), client = prisma) => {
   if (taskId === predecessorId) return true;
   if (visited.has(predecessorId)) return false;
 
   visited.add(predecessorId);
 
-  const predecessors = await taskRepo.findPredecessors(predecessorId);
+  const predecessors = await taskRepo.findPredecessors(predecessorId, client);
   for (const dep of predecessors) {
-    if (await hasCircularDependency(taskId, dep.predecessorId, visited)) {
+    if (await hasCircularDependency(taskId, dep.predecessorId, visited, client)) {
       return true;
     }
   }
@@ -298,7 +298,7 @@ export async function createTask(projectId, userId, body) {
   const autoBlock = autoStart && !assigneeId;
   const now = new Date();
 
-  const task = await taskRepo.createTask({
+  const taskData = {
     title,
     description: description || null,
     priority: priority || 'LOW',
@@ -322,9 +322,15 @@ export async function createTask(projectId, userId, body) {
     projectId,
     ...(assigneeId && { assigneeId }),
     createdById: userId,
-  });
+  };
 
-  await taskRepo.createActivity(task.id, userId, ACTIVITY_TYPE.TASK_CREATED, `Created task "${title}"`);
+  // Core writes are atomic: a task must never exist without its creation audit
+  // entry (and a mid-step failure must not leave a half-written task).
+  const task = await prisma.$transaction(async (tx) => {
+    const created = await taskRepo.createTask(taskData, tx);
+    await taskRepo.createActivity(created.id, userId, ACTIVITY_TYPE.TASK_CREATED, `Created task "${title}"`, null, null, tx);
+    return created;
+  });
 
   // FOLLO ASSIGN — auto-add assignee to project if not already a member
   if (assigneeId) {
@@ -688,18 +694,31 @@ export async function addDependency(taskId, userId, body) {
 
   checkManagerAccess(successor, userId);
 
-  if (await hasCircularDependency(taskId, predecessorId)) {
-    throw new ValidationError('This would create a circular dependency');
+  // Cycle-check + insert must be atomic: two reciprocal concurrent adds (A→B and
+  // B→A) can both pass an independent acyclic check and persist a 2-cycle. A
+  // Serializable transaction makes the predecessor-graph reads + the insert a
+  // single serializable unit, so one of the racing adds is aborted. Retry once on
+  // the serialization conflict (Prisma P2034) before surfacing it.
+  let dependency;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      dependency = await prisma.$transaction(async (tx) => {
+        if (await hasCircularDependency(taskId, predecessorId, new Set(), tx)) {
+          throw new ValidationError('This would create a circular dependency');
+        }
+        const existing = await taskRepo.findExistingDependency(taskId, predecessorId, tx);
+        if (existing) throw new ConflictError('Dependency already exists', ERROR_CODES.ALREADY_EXISTS);
+        return taskRepo.createDependency(
+          { successorId: taskId, predecessorId, lagDays: lagDays || 0 },
+          tx
+        );
+      }, { isolationLevel: 'Serializable' });
+      break;
+    } catch (err) {
+      if (err?.code === 'P2034' && attempt < 2) continue;
+      throw err;
+    }
   }
-
-  const existing = await taskRepo.findExistingDependency(taskId, predecessorId);
-  if (existing) throw new ConflictError('Dependency already exists', ERROR_CODES.ALREADY_EXISTS);
-
-  const dependency = await taskRepo.createDependency({
-    successorId: taskId,
-    predecessorId,
-    lagDays: lagDays || 0,
-  });
 
   await taskRepo.createActivity(
     taskId, userId,

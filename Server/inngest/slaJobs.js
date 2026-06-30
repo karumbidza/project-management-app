@@ -411,6 +411,13 @@ export const onSlaBreach = inngest.createFunction(
       return { skipped: true, reason: 'already resolved' };
     }
 
+    // Idempotency: the breach timer is re-armed whenever the clock resumes
+    // (blocker resolved / rejection), so multiple breach events can target one
+    // task. Only the first should apply the penalty + side-effects.
+    if (task.slaStatus === SLA_STATUS.BREACHED) {
+      return { skipped: true, reason: 'already breached' };
+    }
+
     // BREACH
     await prisma.task.update({
       where: { id: taskId },
@@ -508,15 +515,23 @@ export const onSlaOverdueDaily = inngest.createFunction(
 
     if (!task) return { stopped: true, reason: 'task not found' };
 
-    // Stop if task is now done or pending
+    // Stop if task is now done, pending, blocked (clock re-paused), or resolved
     if (task.status === 'DONE' ||
         task.slaStatus === SLA_STATUS.PENDING_APPROVAL ||
+        task.slaStatus === SLA_STATUS.BLOCKED ||
         task.slaStatus === SLA_STATUS.RESOLVED_ON_TIME ||
         task.slaStatus === SLA_STATUS.RESOLVED_LATE) {
       return { stopped: true, reason: `status=${task.status}, sla=${task.slaStatus}` };
     }
 
     const days = overdueDays(task);
+
+    // Stop if the deadline was extended (e.g. a paused interval credited the
+    // dueDate forward) so the task is no longer overdue — the breach timer will
+    // re-fire if/when the new deadline passes.
+    if (days === 0) {
+      return { stopped: true, reason: 'no longer overdue (deadline extended)' };
+    }
 
     // Increment delayDays
     await step.run('update-delay', async () => {
@@ -613,13 +628,19 @@ export const onTaskApproved = inngest.createFunction(
 
       if (allPredsDone) {
         const now = new Date();
+        // Apply the dependency lag: the successor may not start until `lagDays`
+        // after the predecessor completes. Shift its clock start / planned start
+        // forward so the SLA clock (and the unassigned-at-start check) honour the lag.
+        const lagMs = Math.max(0, (dep.lagDays || 0)) * 24 * 60 * 60 * 1000;
+        const effectiveStart = new Date(now.getTime() + lagMs);
 
         await step.run(`unlock-${successor.id}`, async () => {
           await prisma.task.update({
             where: { id: successor.id },
             data: {
               status:             'TODO',
-              slaClockStartedAt:  now,
+              slaClockStartedAt:  effectiveStart,
+              plannedStartDate:   effectiveStart,
               slaStatus:          SLA_STATUS.HEALTHY,
             },
           });

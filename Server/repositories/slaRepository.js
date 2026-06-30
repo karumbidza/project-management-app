@@ -29,8 +29,8 @@ export const findTaskWithAccess = (taskId) =>
 export const updateTask = (taskId, data) =>
   prisma.task.update({ where: { id: taskId }, data });
 
-export const updateTaskWithIncludes = (taskId, data) =>
-  prisma.task.update({
+export const updateTaskWithIncludes = (taskId, data, client = prisma) =>
+  client.task.update({
     where: { id: taskId },
     data,
     include: {

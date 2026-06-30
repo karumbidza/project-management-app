@@ -454,8 +454,23 @@ const workspaceSlice = createSlice({
                 // but absent from the server response. Keep local-only entries at the front so
                 // the user's current selection is never silently wiped by a stale cache hit.
                 const serverIds = new Set(serverList.map((w) => w.id));
-                const localOnly = (state.workspaces ?? []).filter((w) => !serverIds.has(w.id));
-                state.workspaces = [...localOnly, ...serverList];
+                const prevWorkspaces = state.workspaces ?? [];
+                const localOnly = prevWorkspaces.filter((w) => !serverIds.has(w.id));
+
+                // FOLLO WS-FIX: Deep-merge nested projects for workspaces present in BOTH
+                // lists. A project just created via POST may be absent from the ≤120s-cached
+                // server copy; without this the stale server workspace clobbers it wholesale
+                // (the previous guard only preserved entirely-missing workspaces).
+                const prevById = new Map(prevWorkspaces.map((w) => [w.id, w]));
+                const mergedServer = serverList.map((sw) => {
+                    const prev = prevById.get(sw.id);
+                    if (!prev || !Array.isArray(prev.projects) || !Array.isArray(sw.projects)) return sw;
+                    const serverProjIds = new Set(sw.projects.map((p) => p.id));
+                    const localOnlyProjects = prev.projects.filter((p) => !serverProjIds.has(p.id));
+                    if (localOnlyProjects.length === 0) return sw;
+                    return { ...sw, projects: [...sw.projects, ...localOnlyProjects] };
+                });
+                state.workspaces = [...localOnly, ...mergedServer];
 
                 // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
                 // Only disable member view if user is ADMIN/OWNER in some workspace.

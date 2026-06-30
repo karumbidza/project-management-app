@@ -21,7 +21,8 @@ function CreateWorkspaceDialog({ isOpen, onClose }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
+        if (loading) return; // guard against double-submit (Enter + click / rapid clicks)
+
         if (!name.trim()) {
             toast.error('Workspace name is required');
             return;

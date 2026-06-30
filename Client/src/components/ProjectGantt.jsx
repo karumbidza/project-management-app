@@ -170,6 +170,10 @@ export default function ProjectGantt({ tasks, project }) {
     const [dragging, setDragging] = useState(null);
     const [selectedTask, setSelectedTask] = useState(null);
     const dragStartRef = useRef(null);
+    // Records the exact window listener references attached during an active drag
+    // so they can be detached if the component unmounts mid-drag (otherwise the
+    // mouse/touch move+up handlers leak onto window).
+    const attachedListenersRef = useRef(null);
     const { canCreateTasks } = useUserRole();
     // TASKK MOBILE
     const { isMobile } = useIsMobile();
@@ -287,6 +291,22 @@ export default function ProjectGantt({ tasks, project }) {
         }
     }, [startDate]);
 
+    // Detach any drag listeners still attached if we unmount mid-drag.
+    useEffect(() => {
+        return () => {
+            const a = attachedListenersRef.current;
+            if (!a) return;
+            if (a.kind === 'mouse') {
+                window.removeEventListener('mousemove', a.move);
+                window.removeEventListener('mouseup', a.up);
+            } else {
+                window.removeEventListener('touchmove', a.move);
+                window.removeEventListener('touchend', a.up);
+            }
+            attachedListenersRef.current = null;
+        };
+    }, []);
+
     // Calculate task bar position
     const getTaskPosition = (task) => {
         const taskStart = task.plannedStartDate ? startOfDay(new Date(task.plannedStartDate)) : 
@@ -323,6 +343,7 @@ export default function ProjectGantt({ tasks, project }) {
         setDragging({ taskId: task.id, type });
         window.addEventListener("mousemove", handleMouseMove);
         window.addEventListener("mouseup", handleMouseUp);
+        attachedListenersRef.current = { kind: 'mouse', move: handleMouseMove, up: handleMouseUp };
     };
 
     // TASKK MOBILE: Touch drag support (mirrors mouse drag)
@@ -339,6 +360,7 @@ export default function ProjectGantt({ tasks, project }) {
         setDragging({ taskId: task.id, type });
         window.addEventListener('touchmove', handleTouchMove, { passive: false });
         window.addEventListener('touchend', handleTouchEnd);
+        attachedListenersRef.current = { kind: 'touch', move: handleTouchMove, up: handleTouchEnd };
     };
 
     const handleTouchMove = (e) => {
@@ -368,6 +390,7 @@ export default function ProjectGantt({ tasks, project }) {
     const handleTouchEnd = async () => {
         window.removeEventListener('touchmove', handleTouchMove);
         window.removeEventListener('touchend', handleTouchEnd);
+        attachedListenersRef.current = null;
         if (dragStartRef.current?.newStart || dragStartRef.current?.newEnd) {
             const { task, newStart, newEnd } = dragStartRef.current;
             try {
@@ -420,6 +443,7 @@ export default function ProjectGantt({ tasks, project }) {
     const handleMouseUp = async () => {
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("mouseup", handleMouseUp);
+        attachedListenersRef.current = null;
 
         if (dragStartRef.current?.newStart || dragStartRef.current?.newEnd) {
             const { task, newStart, newEnd } = dragStartRef.current;

@@ -108,12 +108,24 @@ export function resumeClockData(task, now = new Date()) {
   const pausedSince = task.slaClockPausedAt
     ? new Date(task.slaClockPausedAt).getTime()
     : now.getTime();
-  const pausedMs = now.getTime() - pausedSince;
+  const pausedMs = Math.max(0, now.getTime() - pausedSince);
 
-  return {
+  const data = {
     slaClockPausedAt: null,
-    slaTotalPausedMs: (task.slaTotalPausedMs || 0) + Math.max(0, pausedMs),
+    slaTotalPausedMs: (task.slaTotalPausedMs || 0) + pausedMs,
   };
+
+  // Credit the paused interval back to the deadline. Breach detection compares
+  // wall-clock `now` against `dueDate` (not net-elapsed), so without this a task
+  // that was blocked/paused across its due date would be unfairly breached and a
+  // breach event that fired while paused would never be rescheduled. Pushing the
+  // deadline forward by the paused duration keeps the SLA window honest.
+  // NB: this means pausing the SLA clock now extends the deadline.
+  if (task.dueDate && pausedMs > 0) {
+    data.dueDate = new Date(new Date(task.dueDate).getTime() + pausedMs);
+  }
+
+  return data;
 }
 
 /**
@@ -191,11 +203,6 @@ export function clampScore(value) {
 export async function updateContractorScore(prisma, userId, taskId, eventType, metadata = {}) {
   const delta = scoreDelta(eventType, metadata);
 
-  // Upsert: create if first time, otherwise increment
-  const existing = await prisma.contractorScore.findUnique({ where: { userId } });
-
-  const newScore = clampScore((existing?.score ?? 100) + delta);
-
   const incrementFields = {};
   if (eventType === 'ON_TIME_APPROVAL' || eventType === 'EARLY_COMPLETION') {
     incrementFields.onTime = { increment: 1 };
@@ -210,7 +217,11 @@ export async function updateContractorScore(prisma, userId, taskId, eventType, m
     incrementFields.blocked = { increment: 1 };
   }
 
-  const scoreRecord = await prisma.contractorScore.upsert({
+  // Atomic score change: use `{ increment: delta }` so concurrent scoring events
+  // don't lose updates (read-modify-write here was last-writer-wins). The DB-level
+  // increment can transiently exceed MIN/MAX, so we clamp in a follow-up atomic
+  // update against the absorbing bound — idempotent and safe under concurrency.
+  let scoreRecord = await prisma.contractorScore.upsert({
     where: { userId },
     create: {
       userId,
@@ -221,10 +232,17 @@ export async function updateContractorScore(prisma, userId, taskId, eventType, m
       blocked: eventType === 'BLOCKED_EXEMPT' ? 1 : 0,
     },
     update: {
-      score: newScore,
+      score: { increment: delta },
       ...incrementFields,
     },
   });
+
+  if (scoreRecord.score > SLA_SCORE_RULES.MAX_SCORE || scoreRecord.score < SLA_SCORE_RULES.MIN_SCORE) {
+    scoreRecord = await prisma.contractorScore.update({
+      where: { userId },
+      data: { score: clampScore(scoreRecord.score) },
+    });
+  }
 
   // Immutable audit log
   await prisma.slaEvent.create({
