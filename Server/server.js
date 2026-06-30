@@ -42,7 +42,11 @@ import { errorHandler, notFoundHandler } from './utils/errors.js';
 import { responseTimeLogger } from './middlewares/perfMiddleware.js';
 import { apiLimiter } from './middlewares/rateLimiter.js';
 import { sanitiseBody } from './middlewares/sanitise.js';
+import { validateEnv } from './configs/validateEnv.js';
 import prisma from './configs/prisma.js';
+
+// Fail fast on missing/invalid required env vars before binding anything.
+validateEnv();
 
 const app = express();
 const httpServer = createServer(app);

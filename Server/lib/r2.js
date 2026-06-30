@@ -71,6 +71,11 @@ const DANGEROUS_MIME = new Set([
   "application/x-sh",
 ]);
 
+// Pure predicate (exported for testing): is this MIME type active/script-capable?
+export function isDangerousMimeType(mimeType) {
+  return DANGEROUS_MIME.has(String(mimeType || "").toLowerCase());
+}
+
 // ─── Generate a signed upload URL ──────────────────────────────────────────
 // Client uploads directly to R2 — server never touches the file bytes
 // @param {string} mediaType  — "image" | "audio" | "file" (NOT video - use Mux)
@@ -100,7 +105,7 @@ export async function createSignedUploadUrl(mediaType, mimeType, sizeBytes) {
 
   // Block active/script-capable MIME types even for the open "file" type: an
   // HTML/SVG/XML object served from the public CDN origin is a stored-XSS vector.
-  if (DANGEROUS_MIME.has(mimeType.toLowerCase())) {
+  if (isDangerousMimeType(mimeType)) {
     throw new Error(`File type not allowed for security reasons: ${mimeType}`);
   }
 
