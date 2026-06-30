@@ -7,12 +7,13 @@
 
 import express from "express";
 import { createSignedUploadUrl, deleteMediaFile, MEDIA_CONFIG, isR2Configured } from "../lib/r2.js";
-import { createMuxUpload, getMuxAsset, deleteMuxAsset, isMuxConfigured } from "../lib/mux.js";
+import { createMuxUpload, getMuxAsset, deleteMuxAsset, isMuxConfigured, getPlaybackInfo } from "../lib/mux.js";
 import { asyncHandler, ValidationError, AuthorizationError } from "../utils/errors.js";
 import { sendSuccess, sendCreated } from "../utils/response.js";
 import prisma from "../configs/prisma.js";
 import { requireProjectAccess } from "../utils/permissions.js";
 import { PROJECT_ROLES } from "../utils/constants.js";
+import { mediaLimiter } from "../middlewares/rateLimiter.js";
 
 const router = express.Router();
 
@@ -45,8 +46,9 @@ async function assertMediaDeletePermission(userId, { fileKey, assetId }) {
 // Response: { uploadUrl, fileKey, cdnUrl }
 router.post(
   "/sign",
+  mediaLimiter,
   asyncHandler(async (req, res) => {
-    const { mediaType, mimeType, sizeBytes } = req.body;
+    const { mediaType, mimeType, sizeBytes, projectId } = req.body;
 
     // Validate required fields
     if (!mediaType || !mimeType || !sizeBytes) {
@@ -54,6 +56,13 @@ router.post(
         "Missing required fields: mediaType, mimeType, sizeBytes"
       );
     }
+
+    // Object-level authz: only mint an upload URL for a project the caller can
+    // access (prevents any authed user minting unlimited presigned PUTs).
+    if (!projectId) {
+      throw new ValidationError("projectId is required");
+    }
+    await requireProjectAccess(req.userId, projectId);
 
     // Block video — use /sign/video instead (Mux handles encoding)
     if (mediaType === "video") {
@@ -84,7 +93,16 @@ router.post(
 // Response: { uploadUrl, uploadId }
 router.post(
   "/sign/video",
+  mediaLimiter,
   asyncHandler(async (req, res) => {
+    const { projectId } = req.body || {};
+
+    // Object-level authz: only mint a Mux upload for a project the caller can access.
+    if (!projectId) {
+      throw new ValidationError("projectId is required");
+    }
+    await requireProjectAccess(req.userId, projectId);
+
     // Check Mux is configured
     if (!isMuxConfigured()) {
       throw new ValidationError("Video uploads are not configured on this server");
@@ -152,6 +170,30 @@ router.delete(
     await deleteMediaFile(fileKey);
 
     sendSuccess(res, { deleted: true, type: "file", fileKey });
+  })
+);
+
+// ─── GET /api/v1/media/playback/:playbackId ────────────────────────────────
+// Mint ready-to-play (public or short-lived signed) Mux URLs at VIEW time.
+// Authz: the playback ID must belong to a comment whose parent project the
+// caller can access — so signed media can't be streamed cross-tenant.
+router.get(
+  "/playback/:playbackId",
+  asyncHandler(async (req, res) => {
+    const { playbackId } = req.params;
+    if (!playbackId) throw new ValidationError("playbackId is required");
+
+    const comment = await prisma.comment.findFirst({
+      where: { muxPlaybackId: playbackId },
+      select: { task: { select: { projectId: true } } },
+    });
+    if (!comment?.task?.projectId) {
+      throw new AuthorizationError("Media not found or you do not have permission to view it");
+    }
+    await requireProjectAccess(req.userId, comment.task.projectId);
+
+    const info = await getPlaybackInfo(playbackId);
+    sendSuccess(res, info);
   })
 );
 

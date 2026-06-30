@@ -69,17 +69,24 @@ export const commentLimiter = rateLimit({
   },
 });
 
-// Auth/sensitive limiter
-export const authLimiter = rateLimit({
-  windowMs:               15 * 60 * 1000, // 15 minutes
-  max:                    10,              // 10 attempts per 15 min
-  standardHeaders:        true,
-  legacyHeaders:          false,
-  skipSuccessfulRequests: true,            // only count failures
+// Media presign/upload limiter — tight cap on minting upload URLs. Each presign
+// is a free credential to write to R2 / create a Mux upload, so an unbounded
+// caller is a direct storage/transcode cost-amplification vector.
+export const mediaLimiter = rateLimit({
+  windowMs:        60 * 1000, // 1 minute
+  max:             20,         // 20 presign/upload requests per minute per user
+  standardHeaders: true,
+  legacyHeaders:   false,
+  keyGenerator:    userOrIpKey,
   handler: (req, res) => {
     res.status(429).json({
-      error:   'Too many attempts',
-      message: 'Account temporarily locked. Try again in 15 minutes.',
+      error:      'Too many requests',
+      message:    'Too many upload requests. Please wait a moment.',
+      retryAfter: retryAfterSeconds(req),
     });
   },
 });
+
+// NOTE: a generic `authLimiter` previously lived here but was never mounted —
+// Clerk handles authentication, so there's no app-owned login endpoint to guard.
+// Removed as dead code; the media presign flow uses the dedicated `mediaLimiter`.

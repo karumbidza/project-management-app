@@ -80,9 +80,18 @@ const ensureUserInDb = async (userId) => {
     return user;
 };
 
+// FOLLO TESTS / FOLLO SECURITY — the x-test-user-id header bypasses Clerk auth.
+// It is gated so it can NEVER run in a deployed environment: it requires both
+// NODE_ENV==='test' AND the JEST_WORKER_ID that Jest sets only inside its worker
+// processes (never present in a real server). Evaluated once at module load so a
+// later env mutation can't flip it on.
+const TEST_AUTH_ENABLED =
+    process.env.NODE_ENV === 'test' &&
+    process.env.NODE_ENV !== 'production' &&
+    Boolean(process.env.JEST_WORKER_ID);
+
 export const protect = async (req, res, next) => {
-    // FOLLO TESTS — bypass Clerk in test environment
-    if (process.env.NODE_ENV === 'test' && req.headers['x-test-user-id']) {
+    if (TEST_AUTH_ENABLED && req.headers['x-test-user-id']) {
         const testUserId = req.headers['x-test-user-id'];
         req.auth = async () => ({ userId: testUserId });
         req.userId = testUserId;

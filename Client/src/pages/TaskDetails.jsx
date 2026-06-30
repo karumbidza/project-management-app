@@ -268,7 +268,7 @@ const TaskDetails = () => {
             // Upload file first if selected
             if (selectedFile) {
                 try {
-                    mediaData = await upload(selectedFile);
+                    mediaData = await upload(selectedFile, { projectId });
                 } catch (uploadErr) {
                     toast.error(uploadErr.message || "Failed to upload file");
                     // Rollback optimistic update
@@ -449,7 +449,7 @@ const TaskDetails = () => {
             return;
         }
         try {
-            const result = await completionUpload(file);
+            const result = await completionUpload(file, { projectId });
             setCompletionPhotos(prev => [...prev, result.url]);
         } catch (err) {
             toast.error(err?.message || 'Failed to upload photo');
@@ -555,7 +555,7 @@ const TaskDetails = () => {
         try {
             let mediaUrl = null;
             if (blockerFile) {
-                const mediaResult = await blockerUpload(blockerFile);
+                const mediaResult = await blockerUpload(blockerFile, { projectId });
                 mediaUrl = mediaResult.url;
             }
             await dispatch(raiseBlockerAsync({ taskId: task.id, description: blockerDescription.trim(), mediaUrl, getToken })).unwrap();

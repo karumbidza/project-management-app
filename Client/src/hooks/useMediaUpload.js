@@ -55,7 +55,7 @@ export function useMediaUpload() {
   const [error, setError] = useState(null);
 
   const upload = useCallback(
-    async (file) => {
+    async (file, { projectId } = {}) => {
       setUploading(true);
       setProgress(0);
       setError(null);
@@ -67,13 +67,15 @@ export function useMediaUpload() {
 
         // ── Video: use Mux upload flow ─────────────────────────────────────
         if (mediaType === "video") {
-          // 1. Get Mux upload URL
+          // 1. Get Mux upload URL (projectId scopes the presign to a project the
+          //    caller can access — the server requires & verifies it)
           const signRes = await fetch(`${API_URL}/api/v1/media/sign/video`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
             },
+            body: JSON.stringify({ projectId }),
           });
 
           if (!signRes.ok) {
@@ -114,6 +116,7 @@ export function useMediaUpload() {
             mediaType,
             mimeType: file.type,
             sizeBytes: file.size,
+            projectId,
           }),
         });
 

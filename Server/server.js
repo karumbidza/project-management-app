@@ -97,8 +97,14 @@ io.on('connection', (socket) => {
   socket.on('join_project', async (projectId) => {
     if (typeof projectId !== 'string' || projectId.length === 0) return;
     try {
-      await requireProjectAccess(socket.userId, projectId);
+      const access = await requireProjectAccess(socket.userId, projectId);
       socket.join(`project:${projectId}`);
+      // Project chat is OWNER/MANAGER-only (incl. workspace admins, who get
+      // MANAGER access). They also join a private managers room so chat events
+      // are delivered only to them — never broadcast to the whole project room.
+      if (access.role === 'OWNER' || access.role === 'MANAGER') {
+        socket.join(`project:${projectId}:managers`);
+      }
       socket.emit('join_project_ok', { projectId });
     } catch {
       socket.emit('join_project_denied', { projectId });
@@ -108,6 +114,7 @@ io.on('connection', (socket) => {
   socket.on('leave_project', (projectId) => {
     if (typeof projectId === 'string' && projectId.length > 0) {
       socket.leave(`project:${projectId}`);
+      socket.leave(`project:${projectId}:managers`);
     }
   });
 });
@@ -270,7 +277,14 @@ app.get('/api/v1/health', async (req, res) => {
 // INNGEST (Background Jobs) — skips rate limiting
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.use("/api/inngest", serve({ client: inngest, functions }));
+// Pass the signing key explicitly so Inngest verifies the signature on every
+// inbound job request. In production the serve handler refuses unsigned requests
+// (env validation requires INNGEST_SIGNING_KEY before boot).
+app.use("/api/inngest", serve({
+  client: inngest,
+  functions,
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+}));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // API ROUTES (v1) — FOLLO SECURITY
@@ -288,11 +302,9 @@ app.use('/api/v1/templates',     protect, templateRouter); // FOLLO SLA Phase 7
 app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
 app.use('/api/v1/media',         protect, mediaRouter);
 
-// FOLLO AUDIT — Legacy unversioned routes kept for backwards compat; prefer /api/v1/
-// Legacy routes (for backward compatibility - will be deprecated)
-app.use('/api/workspaces', protect, workspaceRouter);
-app.use('/api/projects',   protect, projectRouter);
-app.use('/api/tasks',      protect, taskRouter);
+// NOTE: legacy unversioned mounts (/api/workspaces|projects|tasks) were removed —
+// they were a parallel, less-tested copy of the same routers (extra attack
+// surface). All clients use /api/v1/*.
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ERROR HANDLING — FOLLO SECURITY + FOLLO PERF-2

@@ -56,6 +56,21 @@ export const MEDIA_CONFIG = Object.freeze({
   },
 });
 
+// MIME types that browsers can execute/render as active content. Refused on
+// upload so nothing script-capable can be stored under the public CDN origin.
+const DANGEROUS_MIME = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "application/xml",
+  "text/xml",
+  "application/javascript",
+  "text/javascript",
+  "application/x-msdownload",
+  "application/x-httpd-php",
+  "application/x-sh",
+]);
+
 // ─── Generate a signed upload URL ──────────────────────────────────────────
 // Client uploads directly to R2 — server never touches the file bytes
 // @param {string} mediaType  — "image" | "audio" | "file" (NOT video - use Mux)
@@ -81,6 +96,12 @@ export async function createSignedUploadUrl(mediaType, mimeType, sizeBytes) {
   // Validate mime type (skip for "file" type which allows any)
   if (config.mimeTypes.length > 0 && !config.mimeTypes.includes(mimeType)) {
     throw new Error(`Invalid file type: ${mimeType}. Allowed: ${config.mimeTypes.join(", ")}`);
+  }
+
+  // Block active/script-capable MIME types even for the open "file" type: an
+  // HTML/SVG/XML object served from the public CDN origin is a stored-XSS vector.
+  if (DANGEROUS_MIME.has(mimeType.toLowerCase())) {
+    throw new Error(`File type not allowed for security reasons: ${mimeType}`);
   }
 
   // Build a unique storage key with extension
