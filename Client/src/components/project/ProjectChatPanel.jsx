@@ -27,6 +27,7 @@ export default function ProjectChatPanel({ projectId }) {
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef(null);
+  const listRef = useRef(null);
   const socketRef = useRef(null);
 
   // Scroll to bottom
@@ -57,7 +58,13 @@ export default function ProjectChatPanel({ projectId }) {
   }, [projectId, getToken]);
 
   // Scroll on new messages
-  useEffect(() => { scrollBottom(); }, [messages, scrollBottom]);
+  // Auto-scroll on new messages only when the user is already near the bottom —
+  // otherwise an incoming message yanks them away from the history they're reading.
+  useEffect(() => {
+    const el = listRef.current;
+    const nearBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+    if (nearBottom) scrollBottom();
+  }, [messages, scrollBottom]);
 
   // Socket real-time
   useEffect(() => {
@@ -162,7 +169,7 @@ export default function ProjectChatPanel({ projectId }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Message list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {loading && (
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary, #a1a1aa)', textAlign: 'center', paddingTop: 12 }}>Loading…</div>
         )}

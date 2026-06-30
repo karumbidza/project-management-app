@@ -1,4 +1,5 @@
 // FOLLO SRP
+import { memo } from "react";
 import { MessageCircle, User, Paperclip, X, Image as ImageIcon, Film, Music, FileText } from "lucide-react";
 import { MediaRenderer } from "../MediaRenderer";
 import LoadingButton from "../ui/LoadingButton";
@@ -9,6 +10,98 @@ const getFileIcon = (file) => {
     if (file.type.startsWith("audio/")) return <Music className="w-4 h-4" />;
     return <FileText className="w-4 h-4" />;
 };
+
+// Memoised comment list — deliberately receives no composer state (newComment),
+// so typing in the input no longer re-renders every comment row + MediaRenderer.
+// Its props change only when comments / send-state actually change.
+const CommentList = memo(function CommentList({
+    comments, user, formatDate,
+    pendingCommentIds, confirmedCommentIds, failedCommentIds,
+    setFailedCommentIds, setTask, setNewComment, chatEndRef,
+}) {
+    return (
+        <div className="flex-1 overflow-y-auto">
+            {comments.length > 0 ? (
+                <div className="flex flex-col gap-4 mb-6 mr-2">
+                    {comments.map((comment, index) => {
+                        // WhatsApp-style: own messages on right, others on left
+                        const isOwnMessage = comment.userId === user?.id;
+
+                        // Skip rendering empty text comments (shouldn't happen but safety net)
+                        if ((!comment.type || comment.type === 'TEXT') && !comment.content?.trim()) {
+                            return null;
+                        }
+
+                        const isPending = pendingCommentIds.current.has(comment.id);
+                        const isConfirmed = confirmedCommentIds.has(comment.id);
+                        const isFailed = failedCommentIds.has(comment.id);
+
+                        return (
+                        <div
+                            key={comment.id || `temp-${index}`}
+                            className={`sm:max-w-4/5 dark:bg-gradient-to-br dark:from-zinc-800 dark:to-zinc-900 border border-gray-300 dark:border-zinc-700 p-3 rounded-md ${isOwnMessage ? "ml-auto bg-blue-50 dark:bg-blue-900/20" : "mr-auto"} ${isFailed ? "border-red-400 dark:border-red-600" : ""}`}
+                        >
+                            <div className="flex items-center gap-2 mb-1 text-sm text-gray-500 dark:text-zinc-400">
+                                {comment.user?.image ? (
+                                    <img src={comment.user.image} alt="avatar" className="size-5 rounded-full" />
+                                ) : (
+                                    <div className="size-5 rounded-full bg-blue-500 flex items-center justify-center">
+                                        <User className="w-3 h-3 text-white" />
+                                    </div>
+                                )}
+                                <span className="font-medium text-gray-900 dark:text-white">{comment.user?.name || 'Unknown'}</span>
+                                <span className="text-xs text-gray-400 dark:text-zinc-600">
+                                    • {comment.createdAt ? formatDate(comment.createdAt, "dd MMM yyyy, HH:mm") : 'Just now'}
+                                </span>
+                                {isPending && !isConfirmed && <span className="text-xs" title="Sending...">🕐</span>}
+                                {isConfirmed && <span className="text-xs text-green-500" title="Sent">✓</span>}
+                            </div>
+
+                            {/* FOLLO MEDIA - Render media content */}
+                            {comment.type && comment.type !== 'TEXT' && comment.url && (
+                                <div className="mt-2 mb-2">
+                                    <MediaRenderer comment={comment} />
+                                </div>
+                            )}
+
+                            {/* Text content */}
+                            {comment.content && (
+                                <p className="text-sm text-gray-900 dark:text-zinc-200">{comment.content}</p>
+                            )}
+
+                            {/* Failed retry label */}
+                            {isFailed && (
+                                <button
+                                    onClick={() => {
+                                        // Remove failed state and re-submit
+                                        setFailedCommentIds(prev => {
+                                            const next = new Set(prev);
+                                            next.delete(comment.id);
+                                            return next;
+                                        });
+                                        setTask(prev => ({
+                                            ...prev,
+                                            comments: (prev.comments || []).filter(c => c.id !== comment.id)
+                                        }));
+                                        // Restore content to input for re-send
+                                        if (comment.content) setNewComment(comment.content);
+                                    }}
+                                    className="mt-1 text-xs text-red-500 hover:text-red-400 font-medium"
+                                >
+                                    Failed — tap to retry
+                                </button>
+                            )}
+                        </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <p className="text-gray-600 dark:text-zinc-500 mb-4 text-sm">No comments yet. Be the first!</p>
+            )}
+            <div ref={chatEndRef} />
+        </div>
+    );
+});
 
 const TaskCommentPanel = ({
     comments,
@@ -41,86 +134,18 @@ const TaskCommentPanel = ({
                 <MessageCircle className="size-5" /> Task Discussion ({comments.length})
             </h2>
 
-            <div className="flex-1 overflow-y-auto">
-                {comments.length > 0 ? (
-                    <div className="flex flex-col gap-4 mb-6 mr-2">
-                        {comments.map((comment, index) => {
-                            // WhatsApp-style: own messages on right, others on left
-                            const isOwnMessage = comment.userId === user?.id;
-                            
-                            // Skip rendering empty text comments (shouldn't happen but safety net)
-                            if ((!comment.type || comment.type === 'TEXT') && !comment.content?.trim()) {
-                                return null;
-                            }
-                            
-                            const isPending = pendingCommentIds.current.has(comment.id);
-                            const isConfirmed = confirmedCommentIds.has(comment.id);
-                            const isFailed = failedCommentIds.has(comment.id);
-                            
-                            return (
-                            <div 
-                                key={comment.id || `temp-${index}`} 
-                                className={`sm:max-w-4/5 dark:bg-gradient-to-br dark:from-zinc-800 dark:to-zinc-900 border border-gray-300 dark:border-zinc-700 p-3 rounded-md ${isOwnMessage ? "ml-auto bg-blue-50 dark:bg-blue-900/20" : "mr-auto"} ${isFailed ? "border-red-400 dark:border-red-600" : ""}`} 
-                            >
-                                <div className="flex items-center gap-2 mb-1 text-sm text-gray-500 dark:text-zinc-400">
-                                    {comment.user?.image ? (
-                                        <img src={comment.user.image} alt="avatar" className="size-5 rounded-full" />
-                                    ) : (
-                                        <div className="size-5 rounded-full bg-blue-500 flex items-center justify-center">
-                                            <User className="w-3 h-3 text-white" />
-                                        </div>
-                                    )}
-                                    <span className="font-medium text-gray-900 dark:text-white">{comment.user?.name || 'Unknown'}</span>
-                                    <span className="text-xs text-gray-400 dark:text-zinc-600">
-                                        • {comment.createdAt ? formatDate(comment.createdAt, "dd MMM yyyy, HH:mm") : 'Just now'}
-                                    </span>
-                                    {isPending && !isConfirmed && <span className="text-xs" title="Sending...">🕐</span>}
-                                    {isConfirmed && <span className="text-xs text-green-500" title="Sent">✓</span>}
-                                </div>
-                                
-                                {/* FOLLO MEDIA - Render media content */}
-                                {comment.type && comment.type !== 'TEXT' && comment.url && (
-                                    <div className="mt-2 mb-2">
-                                        <MediaRenderer comment={comment} />
-                                    </div>
-                                )}
-                                
-                                {/* Text content */}
-                                {comment.content && (
-                                    <p className="text-sm text-gray-900 dark:text-zinc-200">{comment.content}</p>
-                                )}
-                                
-                                {/* Failed retry label */}
-                                {isFailed && (
-                                    <button
-                                        onClick={() => {
-                                            // Remove failed state and re-submit
-                                            setFailedCommentIds(prev => {
-                                                const next = new Set(prev);
-                                                next.delete(comment.id);
-                                                return next;
-                                            });
-                                            setTask(prev => ({
-                                                ...prev,
-                                                comments: (prev.comments || []).filter(c => c.id !== comment.id)
-                                            }));
-                                            // Restore content to input for re-send
-                                            if (comment.content) setNewComment(comment.content);
-                                        }}
-                                        className="mt-1 text-xs text-red-500 hover:text-red-400 font-medium"
-                                    >
-                                        Failed — tap to retry
-                                    </button>
-                                )}
-                            </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <p className="text-gray-600 dark:text-zinc-500 mb-4 text-sm">No comments yet. Be the first!</p>
-                )}
-                <div ref={chatEndRef} />
-            </div>
+            <CommentList
+                comments={comments}
+                user={user}
+                formatDate={formatDate}
+                pendingCommentIds={pendingCommentIds}
+                confirmedCommentIds={confirmedCommentIds}
+                failedCommentIds={failedCommentIds}
+                setFailedCommentIds={setFailedCommentIds}
+                setTask={setTask}
+                setNewComment={setNewComment}
+                chatEndRef={chatEndRef}
+            />
 
             {/* Add Comment with FOLLO MEDIA upload */}
             <div className="space-y-3">
@@ -218,4 +243,4 @@ const TaskCommentPanel = ({
     );
 };
 
-export default TaskCommentPanel;
+export default memo(TaskCommentPanel);

@@ -18,8 +18,8 @@ import { GripVertical, User, Calendar, ExternalLink, Lock, Search, Download, Che
 import { updateTaskAsync } from "../features/taskSlice";
 import useUserRole from "../hooks/useUserRole";
 import toast from "react-hot-toast";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+// html2canvas (~200KB) + jspdf (~386KB) are dynamically imported in the export
+// handlers below so they're only fetched when a user actually exports.
 
 // ─── GANTT CSS ANIMATIONS (injected once) ──────────
 const GANTT_STYLE = `
@@ -472,6 +472,7 @@ export default function ProjectGantt({ tasks, project }) {
         if (!ganttRef.current) return;
         setExporting(true);
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(ganttRef.current, {
                 scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
             });
@@ -494,6 +495,10 @@ export default function ProjectGantt({ tasks, project }) {
         if (!ganttRef.current) return;
         setExporting(true);
         try {
+            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                import('html2canvas'),
+                import('jspdf'),
+            ]);
             const canvas = await html2canvas(ganttRef.current, {
                 scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
             });

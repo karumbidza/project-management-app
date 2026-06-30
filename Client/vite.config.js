@@ -30,7 +30,10 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-redux': ['@reduxjs/toolkit', 'react-redux'],
           'vendor-clerk': ['@clerk/clerk-react'],
-          'vendor-ui': ['lucide-react', 'recharts', 'date-fns'],
+          // recharts intentionally NOT pinned here — it's only used by the lazy
+          // Reports route, so Rollup code-splits it into that async chunk instead
+          // of loading ~all charts on every page.
+          'vendor-ui': ['lucide-react', 'date-fns'],
         },
       },
     },

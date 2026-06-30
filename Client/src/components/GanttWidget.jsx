@@ -11,8 +11,8 @@ import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import { format, differenceInDays, addDays, startOfDay, parseISO } from "date-fns";
 import { GanttChart, Calendar, Download } from "lucide-react";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+// html2canvas (~200KB) + jspdf (~386KB) are dynamically imported inside the
+// export handlers so they're only fetched when a user actually exports.
 
 const STATUS_PILLS = [
     { key: 'all', label: 'All' },
@@ -251,6 +251,7 @@ export default function GanttWidget() {
     const handleDownloadPNG = async () => {
         if (!ganttRef.current) return;
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(ganttRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
             const link = document.createElement('a');
             link.download = `gantt-${new Date().toISOString().slice(0, 10)}.png`;
@@ -265,6 +266,10 @@ export default function GanttWidget() {
     const handleDownloadPDF = async () => {
         if (!ganttRef.current) return;
         try {
+            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                import('html2canvas'),
+                import('jspdf'),
+            ]);
             const canvas = await html2canvas(ganttRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
             const imgData = canvas.toDataURL('image/png');
             const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });

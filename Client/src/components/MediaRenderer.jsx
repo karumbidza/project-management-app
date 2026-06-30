@@ -3,11 +3,13 @@
 // Supports lazy loading, lightbox, video player, audio player, and file downloads
 
 import { useState, useRef, useCallback } from "react";
-import { 
-  Play, 
-  Pause, 
-  Download, 
-  FileText, 
+import { useAuth } from "@clerk/clerk-react";
+import { API_V1 } from "../features/apiHelper";
+import {
+  Play,
+  Pause,
+  Download,
+  FileText,
   Image as ImageIcon,
   Film,
   Music,
@@ -93,52 +95,84 @@ function ImageMedia({ comment }) {
 }
 
 // ─── Video with thumbnail preview and HLS player ───────────────────────────
+// Click-to-load: nothing is fetched until the user actually plays (no eager
+// metadata-fetch storm when a thread with many videos opens). For Mux videos the
+// ready-to-play URL (public or short-lived signed token) is resolved at click
+// time from the server so signed playback works and tokens stay fresh.
 function VideoMedia({ comment }) {
+  const { getToken } = useAuth();
   const [playing, setPlaying] = useState(false);
+  const [streamUrl, setStreamUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
   const videoRef = useRef(null);
 
-  const handlePlay = () => {
-    if (videoRef.current) {
-      if (playing) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play();
+  const loadAndPlay = useCallback(async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      let url = comment.url;
+      if (comment.muxPlaybackId) {
+        try {
+          const token = await getToken();
+          const res = await fetch(`${API_V1}/media/playback/${comment.muxPlaybackId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const { data } = await res.json();
+            if (data?.streamUrl) url = data.streamUrl;
+          }
+        } catch {
+          // Fall back to the stored URL (public mode) if token resolution fails.
+        }
       }
-      setPlaying(!playing);
+      setStreamUrl(url);
+      setPlaying(true);
+      requestAnimationFrame(() => videoRef.current?.play().catch(() => {}));
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [comment.url, comment.muxPlaybackId, getToken, loading]);
+
+  const hasVideo = comment.muxPlaybackId || comment.url;
 
   return (
     <div className="max-w-sm rounded-xl overflow-hidden bg-black relative group">
-      {comment.muxPlaybackId || comment.url ? (
-        <>
-          <video
-            ref={videoRef}
-            controls={playing}
-            poster={comment.thumbnailUrl}
-            className="w-full max-w-sm rounded-xl"
-            preload="metadata"
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
-          >
-            <source src={comment.url} type="application/x-mpegURL" />
-            <source src={comment.url} type="video/mp4" />
-            Your browser does not support video playback.
-          </video>
-          
-          {/* Play button overlay */}
-          {!playing && (
-            <div
-              className="absolute inset-0 flex items-center justify-center cursor-pointer bg-black/30 group-hover:bg-black/40 transition-colors"
-              onClick={handlePlay}
-            >
-              <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
-                <Play className="w-8 h-8 text-zinc-900 ml-1" fill="currentColor" />
-              </div>
-            </div>
+      {streamUrl ? (
+        <video
+          ref={videoRef}
+          controls
+          poster={comment.thumbnailUrl}
+          className="w-full max-w-sm rounded-xl"
+          preload="none"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+        >
+          <source src={streamUrl} type="application/x-mpegURL" />
+          <source src={streamUrl} type="video/mp4" />
+          Your browser does not support video playback.
+        </video>
+      ) : hasVideo ? (
+        // Poster + click-to-load (nothing fetched until the user plays)
+        <div
+          className="relative w-full max-w-sm min-h-40 flex items-center justify-center cursor-pointer"
+          onClick={loadAndPlay}
+        >
+          {comment.thumbnailUrl ? (
+            <img src={comment.thumbnailUrl} alt="Video thumbnail" className="w-full max-w-sm rounded-xl object-cover" loading="lazy" />
+          ) : (
+            <div className="w-64 h-40 bg-zinc-900 rounded-xl" />
           )}
-        </>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+            <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
+              {loading ? (
+                <span className="w-6 h-6 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Play className="w-8 h-8 text-zinc-900 ml-1" fill="currentColor" />
+              )}
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="w-64 h-40 bg-zinc-900 flex items-center justify-center rounded-xl">
           <div className="text-center">
@@ -208,7 +242,7 @@ function AudioMedia({ comment }) {
         onEnded={() => setPlaying(false)}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        preload="metadata"
+        preload="none"
       />
 
       {/* Play / Pause button */}

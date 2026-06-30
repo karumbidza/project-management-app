@@ -752,8 +752,10 @@ const TaskDetails = () => {
         fetchTaskDetails({ silent: true });
     }, [fetchTaskDetails]);
 
-    // Get comments from task - filter out empty text comments
-    const comments = (task?.comments || []).filter(c => {
+    // Get comments from task - filter out empty text comments. Memoised on the raw
+    // comments so it doesn't re-run (and re-create the array) on every keystroke in
+    // the composer, which would otherwise re-render the whole comment list.
+    const comments = useMemo(() => (task?.comments || []).filter(c => {
         // Skip invalid/null comments
         if (!c) return false;
         // Keep media comments
@@ -762,7 +764,7 @@ const TaskDetails = () => {
         if (c.content && String(c.content).trim()) return true;
         // Filter out empty text comments
         return false;
-    });
+    }), [task?.comments]);
     
     // Auto-scroll to bottom when comments change
     useEffect(() => {
