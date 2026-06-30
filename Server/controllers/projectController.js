@@ -139,56 +139,41 @@ export const getMyProjects = asyncHandler(async (req, res) => {
         workspace: { select: { id: true, name: true, slug: true } },
       };
 
-      // FOLLO ACCESS: Admin workspaces — get ALL projects
-      const adminProjects = adminWorkspaceIds.length > 0
-        ? await prisma.project.findMany({
-            where: { workspaceId: { in: adminWorkspaceIds } },
-            select: projectSelect,
-            orderBy: { createdAt: 'desc' },
-          })
-        : [];
+      // FOLLO PERF: collect the accessible project IDs with lightweight (id-only)
+      // queries first, then fetch the heavy task-laden payload exactly ONCE. The
+      // previous version ran the heavy `projectSelect` 2-3× over overlapping sets
+      // and merged in JS.
+      // - Admin workspaces: ALL projects
+      // - Member workspaces: projects where the user is a ProjectMember OR has an
+      //   assigned task
+      const [adminIdRows, memberByMembershipRows, memberByAssignmentRows] = await Promise.all([
+        adminWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: adminWorkspaceIds } }, select: { id: true } })
+          : Promise.resolve([]),
+        memberWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: memberWorkspaceIds }, members: { some: { userId } } }, select: { id: true } })
+          : Promise.resolve([]),
+        memberWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: memberWorkspaceIds }, tasks: { some: { assigneeId: userId } } }, select: { id: true } })
+          : Promise.resolve([]),
+      ]);
 
-      // FOLLO ACCESS: Member workspaces — only projects where user is a
-      // ProjectMember OR has at least one assigned task
-      let memberProjects = [];
-      if (memberWorkspaceIds.length > 0) {
-        const [byMembership, byAssignment] = await Promise.all([
-          prisma.project.findMany({
-            where: {
-              workspaceId: { in: memberWorkspaceIds },
-              members: { some: { userId } },
-            },
-            select: projectSelect,
-          }),
-          prisma.project.findMany({
-            where: {
-              workspaceId: { in: memberWorkspaceIds },
-              tasks: { some: { assigneeId: userId } },
-            },
-            select: projectSelect,
-          }),
-        ]);
+      const projectIds = [...new Set(
+        [...adminIdRows, ...memberByMembershipRows, ...memberByAssignmentRows].map(p => p.id)
+      )];
 
-        const seen = new Set();
-        memberProjects = [...byMembership, ...byAssignment].filter(p => {
-          if (seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        });
-      }
+      if (projectIds.length === 0) return [];
 
-      // Merge admin + member projects, deduplicate
-      const seen = new Set();
-      return [...adminProjects, ...memberProjects]
-        .filter(p => {
-          if (seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        })
-        .map(p => {
-          const pm = p.members?.find(m => m.userId === userId);
-          return { ...p, myRole: pm?.role || 'MEMBER' };
-        });
+      const accessibleProjects = await prisma.project.findMany({
+        where:   { id: { in: projectIds } },
+        select:  projectSelect,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return accessibleProjects.map(p => {
+        const pm = p.members?.find(m => m.userId === userId);
+        return { ...p, myRole: pm?.role || 'MEMBER' };
+      });
     }
   );
 
