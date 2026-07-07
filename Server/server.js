@@ -33,6 +33,7 @@ import taskRouter from './routes/taskRoutes.js';
 import webhookRouter from './routes/webhookRoutes.js';
 import mediaRouter from './routes/mediaRoutes.js';
 import taskSlaRouter from './routes/taskSlaRoutes.js';
+import subtaskRouter from './routes/subtaskRoutes.js';
 import templateRouter from './routes/templateRoutes.js';
 import notificationRouter from './routes/notificationRoutes.js';
 
@@ -302,6 +303,7 @@ app.use('/api/v1/workspaces',    protect, workspaceRouter);
 app.use('/api/v1/projects',      protect, projectRouter);
 app.use('/api/v1/tasks',         protect, taskRouter);
 app.use('/api/v1/tasks',         protect, taskSlaRouter);  // FOLLO SLA routes
+app.use('/api/v1/tasks',         protect, subtaskRouter);  // FOLLO ENGINE breakdown/subtasks
 app.use('/api/v1/templates',     protect, templateRouter); // FOLLO SLA Phase 7
 app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
 app.use('/api/v1/media',         protect, mediaRouter);

@@ -94,8 +94,8 @@ export const updateTask = (taskId, data) =>
     },
   });
 
-export const updateTaskPartial = (taskId, data) =>
-  prisma.task.update({
+export const updateTaskPartial = (taskId, data, client = prisma) =>
+  client.task.update({
     where: { id: taskId },
     data,
   });

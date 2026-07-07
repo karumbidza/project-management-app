@@ -73,6 +73,15 @@ export const PRIORITY = Object.freeze({
   CRITICAL: 'CRITICAL',
 });
 
+// FOLLO ENGINE — contractor breakdown/quote lifecycle
+export const BREAKDOWN_STATUS = Object.freeze({
+  NONE: 'NONE',
+  DRAFT: 'DRAFT',
+  SUBMITTED: 'SUBMITTED',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
 export const PROJECT_STATUS = Object.freeze({
   ACTIVE: 'ACTIVE',
   PLANNING: 'PLANNING',
