@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useIsMobile } from '../hooks/useIsMobile';
 import { StatusBadge, SmartTimeLabel } from './gantt/GanttHelpers';
 import { getTimeOverdueShort, getTimeLeftShort } from '../lib/timeFormat';
-import { calcTaskContribution } from '../lib/completionCalc';
+import { calcTaskContribution, getTaskProgressPct } from '../lib/completionCalc';
 import { useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
@@ -913,16 +913,26 @@ export default function ProjectGantt({ tasks, project }) {
                                                 <div style={{ position: 'absolute', top: 0, left: 0, width: '40%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.4),transparent)', animation: 'gantt-shimmer 2s ease-in-out infinite' }} />
                                             </div>
                                         )}
-                                        {/* Completion % overlay for IN_PROGRESS tasks with completionWeight */}
-                                        {state.isActive && task.completionWeight > 0 && (
-                                            <div style={{
-                                                position: 'absolute', left: 0, top: 0, height: '100%',
-                                                width: `${Math.min(100, task.completionWeight)}%`,
-                                                background: 'rgba(0,0,0,0.18)', borderRadius: 'inherit', pointerEvents: 'none',
-                                            }} />
-                                        )}
                                     </div>
                                 )}
+
+                                {/* FOLLO ENGINE — completion fill from subtask check-offs, drawn
+                                    across the planned bar so the Gantt mirrors project progress. */}
+                                {!state.isDone && (() => {
+                                    const pct = getTaskProgressPct(task);
+                                    if (pct <= 0) return null;
+                                    return (
+                                        <div
+                                            title={`${pct}% complete (subtasks)`}
+                                            style={{
+                                                position: 'absolute', left: Math.max(0, plannedStartX),
+                                                width: Math.max(0, plannedWidth * (pct / 100)), height: BAR_H,
+                                                background: 'rgba(22,163,74,0.55)', borderRadius: 3,
+                                                pointerEvents: 'none', zIndex: 1,
+                                            }}
+                                        />
+                                    );
+                                })()}
 
                                 {/* Overdue spill (red extension) — non-DONE only */}
                                 {!state.isDone && state.isOverdue && clampedSpillWidth > 0 && (
