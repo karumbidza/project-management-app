@@ -19,6 +19,8 @@ import {
   getMyRole,
   updateWorkspaceMemberRole,
   removeWorkspaceMember,
+  getWorkspaceInvitations,
+  revokeWorkspaceInvitation,
 } from "../controllers/workspaceController.js";
 import { validate, createWorkspaceSchema, addWorkspaceMemberSchema } from "../utils/validators.js";
 import { writeLimiter } from "../middlewares/rateLimiter.js";
@@ -61,6 +63,15 @@ workspaceRouter.delete(
   writeLimiter,
   requireWorkspaceMembership,
   removeWorkspaceMember
+);
+
+// FOLLO MEMBERS — pending workspace invitations (admin only). Must be before
+// the generic "/:workspaceId" routes to avoid shadowing.
+workspaceRouter.get("/:workspaceId/invitations", getWorkspaceInvitations);
+workspaceRouter.delete(
+  "/:workspaceId/invitations/:invitationId",
+  writeLimiter,
+  revokeWorkspaceInvitation
 );
 
 // DELETE /api/v1/workspaces/:workspaceId - Delete workspace (owner only)

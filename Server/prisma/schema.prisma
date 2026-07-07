@@ -162,9 +162,10 @@ model Workspace {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  members  WorkspaceMember[]
-  projects Project[]
-  owner    User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  projects    Project[]
+  invitations Invitation[] // FOLLO MEMBERS — pending workspace invites
+  owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   // Indexes
   @@index([ownerId])
@@ -529,8 +530,12 @@ model Notification {
 model Invitation {
   id          String       @id @default(uuid())
   email       String
-  projectId   String
-  role        ProjectRole  @default(CONTRIBUTOR)
+  // Exactly one scope is set: projectId for a project invite, workspaceId for a
+  // workspace (org) invite. FOLLO MEMBERS.
+  projectId     String?
+  workspaceId   String?
+  role          ProjectRole    @default(CONTRIBUTOR) // used for project invites
+  workspaceRole WorkspaceRole? // used for workspace invites
   status      InviteStatus @default(PENDING)
   invitedById String
   token       String       @unique @default(uuid())
@@ -540,14 +545,17 @@ model Invitation {
   acceptedAt  DateTime?
 
   // Relations
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  invitedBy User    @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User       @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
 
   // Indexes
   @@unique([email, projectId])
+  @@unique([email, workspaceId])
   @@index([email])
   @@index([token])
   @@index([status])
+  @@index([workspaceId])
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -69,24 +69,46 @@ const syncUserCreation = inngest.createFunction(
         },
         include: {
           project: { include: { workspace: true } },
+          workspace: true, // FOLLO MEMBERS — workspace-scoped invites
         },
       });
 
-      // Process each invitation
+      // Ensure a WorkspaceMember row exists for (user, workspace). Idempotent.
+      const ensureWorkspaceMember = async (workspaceId, role) => {
+        if (!workspaceId) return;
+        const existing = await prisma.workspaceMember.findUnique({
+          where: { userId_workspaceId: { userId: user.id, workspaceId } },
+        });
+        if (!existing) {
+          await prisma.workspaceMember.create({
+            data: { userId: user.id, workspaceId, role: role || 'MEMBER' },
+          });
+        }
+      };
+
+      // Process each invitation — workspace invites add a WorkspaceMember;
+      // project invites add a ProjectMember AND ensure the parent WorkspaceMember.
       for (const invitation of pendingInvitations) {
         try {
-          // IDEMPOTENCY CHECK: skip if already a member
-          const alreadyMember = await prisma.projectMember.findFirst({
-            where: { userId: user.id, projectId: invitation.projectId },
-          });
-          if (!alreadyMember) {
-            await prisma.projectMember.create({
-              data: {
-                userId:    user.id,
-                projectId: invitation.projectId,
-                role:      invitation.role,
-              },
+          if (invitation.workspaceId) {
+            // ── Workspace (org) invitation ──
+            await ensureWorkspaceMember(invitation.workspaceId, invitation.workspaceRole);
+          } else if (invitation.projectId) {
+            // ── Project invitation ──
+            const alreadyMember = await prisma.projectMember.findFirst({
+              where: { userId: user.id, projectId: invitation.projectId },
             });
+            if (!alreadyMember) {
+              await prisma.projectMember.create({
+                data: {
+                  userId:    user.id,
+                  projectId: invitation.projectId,
+                  role:      invitation.role,
+                },
+              });
+            }
+            // Close the gap: a project member must also belong to the workspace.
+            await ensureWorkspaceMember(invitation.project?.workspaceId, 'MEMBER');
           }
 
           await prisma.invitation.update({
@@ -98,7 +120,8 @@ const syncUserCreation = inngest.createFunction(
             level:   'info',
             event:   'inngest.invitation.processed',
             userId:  user.id,
-            project: invitation.project.name,
+            scope:   invitation.workspaceId ? 'workspace' : 'project',
+            target:  invitation.workspace?.name || invitation.project?.name,
           }));
         } catch (error) {
           console.error(JSON.stringify({
