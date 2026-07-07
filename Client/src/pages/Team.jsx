@@ -1,10 +1,17 @@
 import { useEffect, useState, useMemo } from "react";
-import { UsersIcon, Search, UserPlus, Trash2 } from "lucide-react";
+import { UsersIcon, Search, UserPlus, Trash2, Mail, Clock, X } from "lucide-react";
 import InviteMemberDialog from "../components/InviteMemberDialog";
 import { useSelector, useDispatch } from "react-redux";
 import { useUserRole } from "../hooks/useUserRole";
 import { useAuth } from "@clerk/clerk-react";
-import { fetchAllUsersAsync, addWorkspaceMemberAsync, removeWorkspaceMemberAsync } from "../features/workspaceSlice";
+import {
+    fetchAllUsersAsync,
+    addWorkspaceMemberAsync,
+    removeWorkspaceMemberAsync,
+    updateWorkspaceMemberRoleAsync,
+    fetchWorkspaceInvitationsAsync,
+    revokeWorkspaceInvitationAsync,
+} from "../features/workspaceSlice";
 import toast from "react-hot-toast";
 import { Navigate } from "react-router-dom";
 
@@ -19,13 +26,20 @@ const Team = () => {
     const [confirmRemoveId, setConfirmRemoveId] = useState(null); // userId pending confirmation
     const currentWorkspace = useSelector((state) => state?.workspace?.currentWorkspace || null);
     const allUsers = useSelector((state) => state?.workspace?.allUsers || []);
+    const pendingInvitations = useSelector((state) => state?.workspace?.pendingInvitations || []);
 
-    // Fetch all system users for admin
+    // Fetch all system users + pending invitations for admin
     useEffect(() => {
         if (canManageMembers) {
             dispatch(fetchAllUsersAsync(getToken));
         }
     }, [canManageMembers, dispatch]);
+
+    useEffect(() => {
+        if (canManageMembers && currentWorkspace?.id) {
+            dispatch(fetchWorkspaceInvitationsAsync({ workspaceId: currentWorkspace.id, getToken }));
+        }
+    }, [canManageMembers, currentWorkspace?.id, dispatch]);
 
     // Users not in current workspace
     const otherUsers = useMemo(() => {
@@ -85,14 +99,43 @@ const Team = () => {
         }
     };
 
+    const handleRoleChange = async (memberId, role) => {
+        if (!currentWorkspace) return;
+        try {
+            await dispatch(updateWorkspaceMemberRoleAsync({
+                workspaceId: currentWorkspace.id,
+                userId: memberId,
+                role,
+                getToken,
+            })).unwrap();
+            toast.success("Role updated");
+        } catch (error) {
+            toast.error(error || "Failed to update role");
+        }
+    };
+
+    const handleRevokeInvite = async (invitationId) => {
+        if (!currentWorkspace) return;
+        try {
+            await dispatch(revokeWorkspaceInvitationAsync({
+                workspaceId: currentWorkspace.id,
+                invitationId,
+                getToken,
+            })).unwrap();
+            toast.success("Invitation revoked");
+        } catch (error) {
+            toast.error(error || "Failed to revoke invitation");
+        }
+    };
+
     return (
         <div className="space-y-6 max-w-6xl mx-auto">
             {/* Header */}
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
                 <div>
-                    <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white mb-1">Team</h1>
+                    <h1 className="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white mb-1">Members</h1>
                     <p className="text-gray-500 dark:text-zinc-400 text-sm">
-                        Manage team members and their contributions
+                        Invite people to {currentWorkspace?.name || "your organisation"} and manage their access. Members can then be assigned to projects.
                     </p>
                 </div>
                 {canManageMembers && (
@@ -172,15 +215,28 @@ const Team = () => {
                                                 {user.user.email}
                                             </td>
                                             <td className="px-6 py-2.5 whitespace-nowrap">
-                                                <span className={`px-2 py-1 text-xs rounded-md ${
-                                                    isOwner
-                                                        ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400"
-                                                        : user.role === "ADMIN"
-                                                        ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
-                                                        : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
-                                                }`}>
-                                                    {isOwner ? "Owner" : user.role || "User"}
-                                                </span>
+                                                {isOwner ? (
+                                                    <span className="px-2 py-1 text-xs rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                                                        Owner
+                                                    </span>
+                                                ) : canManageMembers ? (
+                                                    <select
+                                                        value={user.role || "MEMBER"}
+                                                        onChange={(e) => handleRoleChange(memberId, e.target.value)}
+                                                        className="text-xs rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-gray-700 dark:text-zinc-300 px-2 py-1 focus:outline-none focus:border-blue-500"
+                                                    >
+                                                        <option value="MEMBER">Member</option>
+                                                        <option value="ADMIN">Admin</option>
+                                                    </select>
+                                                ) : (
+                                                    <span className={`px-2 py-1 text-xs rounded-md ${
+                                                        user.role === "ADMIN"
+                                                            ? "bg-purple-100 dark:bg-purple-500/20 text-purple-500 dark:text-purple-400"
+                                                            : "bg-gray-200 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300"
+                                                    }`}>
+                                                        {user.role || "User"}
+                                                    </span>
+                                                )}
                                             </td>
                                             {canManageMembers && (
                                                 <td className="px-6 py-2.5 whitespace-nowrap text-right">
@@ -249,6 +305,39 @@ const Team = () => {
                     </div>
                 )}
             </div>
+
+            {/* Pending Invitations (FOLLO MEMBERS) */}
+            {canManageMembers && pendingInvitations.length > 0 && (
+                <div className="w-full max-w-4xl">
+                    <h2 className="text-sm font-medium text-gray-500 dark:text-zinc-400 mb-3 flex items-center gap-2">
+                        <Clock className="size-3.5" /> Pending invitations ({pendingInvitations.length})
+                    </h2>
+                    <div className="rounded-md border border-gray-200 dark:border-zinc-800 divide-y divide-gray-200 dark:divide-zinc-800">
+                        {pendingInvitations.map((inv) => (
+                            <div key={inv.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="size-7 rounded-full bg-gray-100 dark:bg-zinc-800 flex items-center justify-center shrink-0">
+                                        <Mail className="size-3.5 text-gray-400" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-sm text-gray-800 dark:text-zinc-200 truncate">{inv.email}</p>
+                                        <p className="text-xs text-gray-400 dark:text-zinc-500">
+                                            Invited as {(inv.workspaceRole || "MEMBER").toLowerCase()} · awaiting sign-up
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => handleRevokeInvite(inv.id)}
+                                    className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors shrink-0"
+                                    title="Revoke invitation"
+                                >
+                                    <X className="size-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Other System Users (not in workspace) */}
             {canManageMembers && filteredOtherUsers.length > 0 && (

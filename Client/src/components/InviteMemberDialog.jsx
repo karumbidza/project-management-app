@@ -74,14 +74,15 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
         setIsSubmitting(true);
         try {
             if (inviteType === "workspace") {
-                // FOLLO ROLE-FIX: Write WorkspaceMember row to DB first (primary path).
-                // Clerk invite is secondary (non-fatal) — sends the notification email only.
-                await dispatch(addWorkspaceMemberAsync({
+                // FOLLO MEMBERS: existing users are added straight away; unknown
+                // emails become a pending invitation and are auto-joined on sign-up.
+                const res = await dispatch(addWorkspaceMemberAsync({
                     workspaceId: currentWorkspace.id,
                     email: formData.email,
                     role: formData.workspaceRole,
                     getToken,
                 })).unwrap();
+                const isInvite = res?.result?.type === "invitation";
 
                 // Secondary: Clerk invite email (non-fatal — DB write already succeeded)
                 if (organization) {
@@ -93,7 +94,11 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
                     }
                 }
 
-                toast.success(`${formData.email} added to workspace!`);
+                toast.success(
+                    isInvite
+                        ? `Invitation sent to ${formData.email} — they'll join when they sign up`
+                        : `${formData.email} added to workspace!`,
+                );
             } else {
                 // Add to specific project (contractor) - uses our custom API + Resend
                 const result = await dispatch(addProjectMemberAsync({
