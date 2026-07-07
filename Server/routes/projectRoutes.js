@@ -10,6 +10,7 @@ import {
   getWorkspaceProjects,
   getMyProjects,
   getProjectById,
+  getProjectCostSummary,
   createProject,
   updateProject,
   deleteProject,
@@ -67,6 +68,9 @@ router.post(
 
 // GET /api/v1/projects/:projectId - Get project by ID
 router.get("/:projectId", getProjectById);
+
+// GET /api/v1/projects/:projectId/cost-summary - budget vs committed vs actual (managers)
+router.get("/:projectId/cost-summary", getProjectCostSummary);
 
 // PATCH /api/v1/projects/:projectId - Update project
 router.patch("/:projectId", validate(updateProjectSchema), updateProject);

@@ -37,6 +37,7 @@ import TaskActionPanel from "../components/task/TaskActionPanel";
 import TaskCommentPanel from "../components/task/TaskCommentPanel";
 import ProjectInfoCard from "../components/task/ProjectInfoCard";
 import TaskDependencies from "../components/TaskDependencies"; // FOLLO DEPS
+import TaskBreakdownPanel from "../components/task/TaskBreakdownPanel"; // FOLLO ENGINE
 import NotAuthorised from "../components/NotAuthorised";
 
 // FOLLO PERF — comments now arrive in real time via the `task_comment_added`
@@ -898,6 +899,8 @@ const TaskDetails = () => {
                         onDepsChanged={handleDepsChanged}
                     />
                 </div>
+                {/* FOLLO ENGINE — contractor breakdown, quoting & subtask check-off */}
+                <TaskBreakdownPanel taskId={task.id} isReadOnly={isReadOnly} />
                 {!isReadOnly && (
                 <TaskActionPanel
                     task={task}

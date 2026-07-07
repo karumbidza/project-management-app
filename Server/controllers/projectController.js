@@ -31,6 +31,8 @@ import {
   ERROR_CODES 
 } from "../utils/constants.js";
 import emailService from "../utils/emailService.js";
+import { requireProjectManager } from "../utils/permissions.js"; // FOLLO ENGINE
+import { getProjectCostRollup } from "../services/subtaskService.js"; // FOLLO ENGINE
 import { withCache, invalidateCachePattern, invalidateCache, CACHE_KEYS, CACHE_TTL } from "../lib/cache.js";
 import { userSelect, taskListSelect, memberSelect, projectListSelect } from "../lib/selectShapes.js";
 import { io } from "../server.js";
@@ -242,6 +244,32 @@ export const getProjectById = asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, { ...project, recentActivity });
+});
+
+/**
+ * Project cost rollup — budget vs committed (approved quotes) vs actual.
+ * FOLLO ENGINE. Manager-only: pricing stays confidential from the field.
+ * GET /api/v1/projects/:projectId/cost-summary
+ */
+export const getProjectCostSummary = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+
+  // Throws AuthorizationError for non-managers.
+  const { project } = await requireProjectManager(userId, projectId);
+
+  const rollup = await getProjectCostRollup(projectId);
+  const budget = project?.budget != null ? Number(project.budget) : null;
+  const remaining = budget != null ? budget - rollup.committed : null;
+
+  sendSuccess(res, {
+    budget,
+    committed: rollup.committed,
+    actual: rollup.actual,
+    remaining,
+    overBudget: budget != null && rollup.committed > budget,
+    subtaskCount: rollup.subtaskCount,
+  });
 });
 
 /**
