@@ -321,7 +321,18 @@ export const addMemberToWorkspace = asyncHandler(async (req, res) => {
       role: wsRole,
     }).catch(err => console.error('[Email] Failed to send workspace invite:', err));
 
-    invalidateCachePattern(CACHE_KEYS.userWorkspaces(userToAdd.id));
+    // Bust the cached workspace list for the new member AND every existing
+    // member (incl. the inviting admin). getUserWorkspaces caches per-user, so
+    // without this the admin's own dashboard and task assign dropdown keep
+    // showing the stale roster — missing the person they just added — until the
+    // cache TTL expires.
+    const affectedUserIds = new Set([
+      userToAdd.id,
+      ...workspace.members.map((m) => m.userId),
+    ]);
+    for (const uid of affectedUserIds) {
+      invalidateCachePattern(CACHE_KEYS.userWorkspaces(uid));
+    }
     invalidateCachePattern(CACHE_KEYS.userProjects(userToAdd.id));
 
     return sendCreated(res, { type: 'member', member }, 'Member added to workspace');

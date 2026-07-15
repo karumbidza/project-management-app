@@ -3,6 +3,7 @@
 import prisma from "../configs/prisma.js";
 import { clerkClient } from "@clerk/express";
 import { cache } from "../lib/cache.js";
+import { processPendingInvitationsForUser } from "../utils/invitations.js";
 
 // How long to trust that a user has been synced to our DB before re-checking.
 const USER_SYNC_TTL = 300; // 5 minutes
@@ -78,6 +79,19 @@ const ensureUserInDb = async (userId) => {
                 }
             } else {
                 throw error;
+            }
+        }
+
+        // We just created (or migrated) this user's row. Accept any workspace/
+        // project invitations sent to their email BEFORE they had an account —
+        // otherwise an invitee who opens the app never joins, because the Clerk
+        // webhook that used to be the only acceptance path skips already-synced
+        // users. Never let this block authentication.
+        if (user) {
+            try {
+                await processPendingInvitationsForUser(user);
+            } catch (error) {
+                console.error(JSON.stringify({ level: 'error', event: 'auth.invitations.failed', userId, error: error.message }));
             }
         }
     }
