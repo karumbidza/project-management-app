@@ -7,6 +7,7 @@ import emailService from "../utils/emailService.js";
 import { inngest } from "./client.js";
 import { slaFunctions } from "./slaJobs.js";
 import { io } from "../server.js";
+import { processPendingInvitationsForUser } from "../utils/invitations.js";
 
 // Re-export the shared client so existing imports (`from './inngest/index.js'`) keep working
 export { inngest };
@@ -43,82 +44,26 @@ const syncUserCreation = inngest.createFunction(
     const { data } = event;
     const email = data?.email_addresses[0]?.email_address?.toLowerCase();
 
-    // IDEMPOTENCY CHECK: skip if user already exists
-    const existing = await prisma.user.findUnique({ where: { id: data.id } });
-    if (existing) {
-      return { skipped: true, reason: 'user already exists' };
-    }
-
-    // Create the user
-    const user = await prisma.user.create({
-      data: {
-        id:    data.id,
-        email: email,
-        name:  data?.first_name + ' ' + data?.last_name,
-        image: data?.image_url,
-      },
-    });
-
-    // Check for pending invitations for this email
-    if (email) {
-      const pendingInvitations = await prisma.invitation.findMany({
-        where: {
-          email:     email,
-          status:    'PENDING',
-          expiresAt: { gte: new Date() },
-        },
-        include: {
-          project: { include: { workspace: true } },
+    // Create the user if they don't exist yet. The auth middleware may have
+    // already created them on their first request, so this is idempotent —
+    // but we still fall through to invitation processing either way, because
+    // whoever created the row first is responsible for accepting invites and
+    // we must not skip that just because the row already exists.
+    let user = await prisma.user.findUnique({ where: { id: data.id } });
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          id:    data.id,
+          email: email,
+          name:  data?.first_name + ' ' + data?.last_name,
+          image: data?.image_url,
         },
       });
-
-      // Process each invitation
-      for (const invitation of pendingInvitations) {
-        try {
-          // IDEMPOTENCY CHECK: skip if already a member
-          const alreadyMember = await prisma.projectMember.findFirst({
-            where: { userId: user.id, projectId: invitation.projectId },
-          });
-          if (!alreadyMember) {
-            await prisma.projectMember.create({
-              data: {
-                userId:    user.id,
-                projectId: invitation.projectId,
-                role:      invitation.role,
-              },
-            });
-          }
-
-          await prisma.invitation.update({
-            where: { id: invitation.id },
-            data:  { status: 'ACCEPTED', acceptedAt: new Date() },
-          });
-
-          console.info(JSON.stringify({
-            level:   'info',
-            event:   'inngest.invitation.processed',
-            userId:  user.id,
-            project: invitation.project.name,
-          }));
-        } catch (error) {
-          console.error(JSON.stringify({
-            level:        'error',
-            event:        'inngest.invitation.failed',
-            invitationId: invitation.id,
-            error:        error.message,
-          }));
-        }
-      }
-
-      if (pendingInvitations.length > 0) {
-        console.info(JSON.stringify({
-          level:  'info',
-          event:  'inngest.invitations.processed',
-          userId: user.id,
-          count:  pendingInvitations.length,
-        }));
-      }
     }
+
+    // Accept any workspace/project invitations sent to this email before signup.
+    const processed = await processPendingInvitationsForUser(user);
+    return { userId: user.id, invitationsProcessed: processed };
   }
 );
 

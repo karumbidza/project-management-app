@@ -16,6 +16,12 @@ export default defineConfig({
       org:       process.env.SENTRY_ORG,
       project:   process.env.SENTRY_PROJECT,
       authToken: process.env.SENTRY_AUTH_TOKEN,
+      // Pin the release name so uploaded source maps associate with the runtime
+      // release (Sentry.init uses import.meta.env.VITE_APP_VERSION). When unset the
+      // plugin falls back to git auto-detection.
+      release:   process.env.VITE_APP_VERSION
+        ? { name: process.env.VITE_APP_VERSION }
+        : undefined,
       // Only upload when auth token is present (skips in dev)
       disable:   !process.env.SENTRY_AUTH_TOKEN,
     }),
@@ -30,7 +36,10 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-redux': ['@reduxjs/toolkit', 'react-redux'],
           'vendor-clerk': ['@clerk/clerk-react'],
-          'vendor-ui': ['lucide-react', 'recharts', 'date-fns'],
+          // recharts intentionally NOT pinned here — it's only used by the lazy
+          // Reports route, so Rollup code-splits it into that async chunk instead
+          // of loading ~all charts on every page.
+          'vendor-ui': ['lucide-react', 'date-fns'],
         },
       },
     },

@@ -27,6 +27,7 @@ export default function ProjectChatPanel({ projectId }) {
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef(null);
+  const listRef = useRef(null);
   const socketRef = useRef(null);
 
   // Scroll to bottom
@@ -57,15 +58,32 @@ export default function ProjectChatPanel({ projectId }) {
   }, [projectId, getToken]);
 
   // Scroll on new messages
-  useEffect(() => { scrollBottom(); }, [messages, scrollBottom]);
+  // Auto-scroll on new messages only when the user is already near the bottom —
+  // otherwise an incoming message yanks them away from the history they're reading.
+  useEffect(() => {
+    const el = listRef.current;
+    const nearBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+    if (nearBottom) scrollBottom();
+  }, [messages, scrollBottom]);
 
   // Socket real-time
   useEffect(() => {
     if (!projectId || forbidden) return;
 
-    const socket = ioClient(API, { withCredentials: true });
+    // FOLLO SECURITY — authenticate the socket with a fresh Clerk JWT. The auth
+    // callback runs again on every (re)connect, so reconnects re-authenticate.
+    const socket = ioClient(API, {
+      withCredentials: true,
+      auth: async (cb) => {
+        try { cb({ token: await getToken() }); }
+        catch { cb({}); }
+      },
+    });
     socketRef.current = socket;
-    socket.emit('join_project', projectId);
+
+    // Re-join the project room on first connect AND after any reconnect —
+    // otherwise a dropped connection silently stops delivering messages.
+    socket.on('connect', () => socket.emit('join_project', projectId));
 
     socket.on('project_comment_added', (comment) => {
       setMessages(prev => {
@@ -80,24 +98,52 @@ export default function ProjectChatPanel({ projectId }) {
 
     return () => {
       socket.emit('leave_project', projectId);
+      socket.off('connect');
       socket.off('project_comment_added');
       socket.off('project_comment_deleted');
       socket.disconnect();
     };
-  }, [projectId, forbidden]);
+  }, [projectId, forbidden, getToken]);
 
   const send = async () => {
-    if (!input.trim() || sending) return;
+    const content = input.trim();
+    if (!content || sending) return;
     setSending(true);
+
+    // FOLLO PERF — optimistic insert: show the message instantly instead of
+    // waiting for the HTTP round-trip + socket echo. The temp row is replaced
+    // by the server copy on success (deduped by id), or removed on failure.
+    const tempId = `temp-${Date.now()}-${Math.round(performance.now())}`;
+    const optimistic = {
+      id: tempId,
+      content,
+      userId: clerkUser?.id,
+      user: { name: clerkUser?.fullName, image: clerkUser?.imageUrl },
+      createdAt: new Date().toISOString(),
+      _pending: true,
+    };
+    setMessages(prev => [...prev, optimistic]);
+    setInput('');
+
     try {
       const token = await getToken();
       const res = await fetch(`${API}/api/v1/projects/${projectId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ content: input.trim() }),
+        body: JSON.stringify({ content }),
       });
-      if (res.ok) setInput('');
-    } catch { /* ignore */ } finally {
+      if (!res.ok) throw new Error('send failed');
+      const saved = (await res.json())?.data;
+      setMessages(prev => {
+        const withoutTemp = prev.filter(m => m.id !== tempId);
+        if (saved && !withoutTemp.some(m => m.id === saved.id)) return [...withoutTemp, saved];
+        return withoutTemp;
+      });
+    } catch {
+      // Roll back the optimistic row and restore the draft so nothing is lost.
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      setInput(content);
+    } finally {
       setSending(false);
     }
   };
@@ -123,7 +169,7 @@ export default function ProjectChatPanel({ projectId }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Message list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {loading && (
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary, #a1a1aa)', textAlign: 'center', paddingTop: 12 }}>Loading…</div>
         )}

@@ -16,7 +16,7 @@ const BottomTabBar = () => {
     ];
 
     const moreItems = [
-        ...(canManageMembers ? [{ name: 'Team', href: '/team', icon: UsersIcon }] : []),
+        ...(canManageMembers ? [{ name: 'Members', href: '/team', icon: UsersIcon }] : []),
         ...(canViewReports ? [{ name: 'Reports', href: '/reports', icon: BarChart3 }] : []),
         ...(isAdmin ? [{ name: 'Settings', href: '/settings', icon: SettingsIcon }] : []),
     ];

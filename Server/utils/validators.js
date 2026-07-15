@@ -165,6 +165,52 @@ export const removeDependencySchema = z.object({
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SUBTASK / BREAKDOWN SCHEMAS (FOLLO ENGINE)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const lineItemSchema = z.object({
+  label: z.string().min(1, 'Line item label is required').max(LIMITS.NAME_MAX_LENGTH).trim(),
+  quantity: z.coerce.number().min(0, 'Quantity cannot be negative').default(1),
+  unitCost: z.coerce.number().min(0, 'Unit cost cannot be negative').default(0),
+});
+
+export const createSubtaskSchema = z.object({
+  title: z
+    .string()
+    .min(LIMITS.NAME_MIN_LENGTH, 'Subtask title is required')
+    .max(LIMITS.NAME_MAX_LENGTH)
+    .trim(),
+  description: z.string().max(LIMITS.DESCRIPTION_MAX_LENGTH).optional().nullable(),
+  plannedStartDate: z.string().optional().nullable(),
+  plannedEndDate: z.string().optional().nullable(),
+  // Lump-sum quote; ignored when lineItems are supplied (cost derives from them).
+  quotedCost: z.coerce.number().min(0, 'Quote cannot be negative').optional().default(0),
+  completionWeight: z.coerce.number().int().min(1).max(100).optional().default(1),
+  lineItems: z.array(lineItemSchema).max(50).optional(),
+});
+
+export const updateSubtaskSchema = z.object({
+  title: z.string().min(LIMITS.NAME_MIN_LENGTH).max(LIMITS.NAME_MAX_LENGTH).trim().optional(),
+  description: z.string().max(LIMITS.DESCRIPTION_MAX_LENGTH).optional().nullable(),
+  plannedStartDate: z.string().optional().nullable(),
+  plannedEndDate: z.string().optional().nullable(),
+  quotedCost: z.coerce.number().min(0).optional(),
+  completionWeight: z.coerce.number().int().min(1).max(100).optional(),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+  lineItems: z.array(lineItemSchema).max(50).optional(),
+  // Actual spend recorded as the work gets done.
+  actualCost: z.coerce.number().min(0).optional().nullable(),
+}).refine((d) => Object.keys(d).length > 0, { message: 'No fields to update' });
+
+export const toggleSubtaskSchema = z.object({
+  isComplete: z.coerce.boolean(),
+});
+
+export const rejectBreakdownSchema = z.object({
+  reason: z.string().max(LIMITS.DESCRIPTION_MAX_LENGTH).optional().nullable(),
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // COMMENT SCHEMAS (FOLLO MEDIA)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

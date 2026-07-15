@@ -110,12 +110,12 @@ export const calculateDelay = (task) => {
   const plannedEnd = new Date(task.plannedEndDate);
   const actualEnd = task.actualEndDate ? new Date(task.actualEndDate) : null;
 
-  if (task.status === TASK_STATUS.COMPLETED && actualEnd) {
+  if (task.status === TASK_STATUS.DONE && actualEnd) {
     const delayDays = Math.ceil((actualEnd - plannedEnd) / (1000 * 60 * 60 * 24));
     return { isDelayed: delayDays > 0, delayDays: Math.max(0, delayDays) };
   }
 
-  if (task.status !== TASK_STATUS.COMPLETED && now > plannedEnd) {
+  if (task.status !== TASK_STATUS.DONE && now > plannedEnd) {
     const delayDays = Math.ceil((now - plannedEnd) / (1000 * 60 * 60 * 24));
     return { isDelayed: true, delayDays };
   }
@@ -123,15 +123,15 @@ export const calculateDelay = (task) => {
   return { isDelayed: false, delayDays: 0 };
 };
 
-const hasCircularDependency = async (taskId, predecessorId, visited = new Set()) => {
+const hasCircularDependency = async (taskId, predecessorId, visited = new Set(), client = prisma) => {
   if (taskId === predecessorId) return true;
   if (visited.has(predecessorId)) return false;
 
   visited.add(predecessorId);
 
-  const predecessors = await taskRepo.findPredecessors(predecessorId);
+  const predecessors = await taskRepo.findPredecessors(predecessorId, client);
   for (const dep of predecessors) {
-    if (await hasCircularDependency(taskId, dep.predecessorId, visited)) {
+    if (await hasCircularDependency(taskId, dep.predecessorId, visited, client)) {
       return true;
     }
   }
@@ -191,49 +191,29 @@ export async function getProjectTasks(projectId, userId) {
 
   const filtered = isManager ? tasks : tasks.filter(t => t.assigneeId === userId);
 
-  // FOLLO AUTOSTART — auto-start TODO tasks whose plannedStartDate has arrived
+  // FOLLO AUTOSTART — a TODO task whose planned start has arrived should APPEAR
+  // started (or blocked, if unassigned). This used to write to the DB on every
+  // GET (writes during a read + cache churn). The actual persistence + SLA events
+  // now happen in daily crons (onDailyAutoStart / onDailyUnassignedCheck); here we
+  // only project the display status so the UI is immediately consistent.
   const todayMs = new Date().setHours(0, 0, 0, 0);
-  const autoStartPromises = filtered
-    .filter(t => t.status === 'TODO' && t.plannedStartDate &&
-      new Date(t.plannedStartDate).setHours(0, 0, 0, 0) <= todayMs)
-    .map(async (t) => {
-      const now = new Date();
+  return filtered.map((task) => {
+    const overrides = autoStartDisplayStatus(task, todayMs);
+    const t = overrides ? { ...task, ...overrides } : task;
+    return { ...t, ...calculateDelay(t) };
+  });
+}
 
-      // Unassigned tasks get auto-blocked instead of auto-started
-      if (!t.assigneeId) {
-        if (t.slaStatus !== 'BLOCKED') {
-          await taskRepo.updateTask(t.id, {
-            status: 'BLOCKED',
-            slaStatus: 'BLOCKED',
-            blockerRaisedAt: now,
-            blockerDescription: 'Task blocked — no assignee',
-            slaClockPausedAt: now,
-          });
-          t.status = 'BLOCKED';
-          t.slaStatus = 'BLOCKED';
-          t.blockerDescription = 'Task blocked — no assignee';
-          logSlaEvent(prisma, { taskId: t.id, type: SLA_EVENT_TYPE.BLOCKER_RAISED, triggeredBy: 'system', metadata: { reason: 'unassigned at start date' } })
-            .catch(err => console.error('[SLA] auto-block logSlaEvent failed:', err));
-        }
-        return;
-      }
-
-      await taskRepo.updateTask(t.id, {
-        status: 'IN_PROGRESS',
-        actualStartDate: now,
-        slaClockStartedAt: now,
-      });
-      t.status = 'IN_PROGRESS';
-      t.actualStartDate = now;
-      logSlaEvent(prisma, { taskId: t.id, type: SLA_EVENT_TYPE.CLOCK_STARTED, triggeredBy: 'system' })
-        .catch(err => console.error('[SLA] auto-start logSlaEvent failed:', err));
-    });
-  if (autoStartPromises.length > 0) {
-    await Promise.all(autoStartPromises);
-    invalidateCache(CACHE_KEYS.projectTasks(projectId));
+// Pure, read-only projection of the auto-start/auto-block status for a TODO task
+// whose planned start date has arrived. Returns display overrides, or null.
+function autoStartDisplayStatus(t, todayMs) {
+  if (t.status !== 'TODO' || !t.plannedStartDate) return null;
+  if (new Date(t.plannedStartDate).setHours(0, 0, 0, 0) > todayMs) return null;
+  if (!t.assigneeId) {
+    if (t.slaStatus === 'BLOCKED') return null;
+    return { status: 'BLOCKED', slaStatus: 'BLOCKED', blockerDescription: 'Task blocked — no assignee' };
   }
-
-  return filtered.map(task => ({ ...task, ...calculateDelay(task) }));
+  return { status: 'IN_PROGRESS' };
 }
 
 export async function getTaskById(taskId, userId) {
@@ -298,7 +278,7 @@ export async function createTask(projectId, userId, body) {
   const autoBlock = autoStart && !assigneeId;
   const now = new Date();
 
-  const task = await taskRepo.createTask({
+  const taskData = {
     title,
     description: description || null,
     priority: priority || 'LOW',
@@ -322,9 +302,15 @@ export async function createTask(projectId, userId, body) {
     projectId,
     ...(assigneeId && { assigneeId }),
     createdById: userId,
-  });
+  };
 
-  await taskRepo.createActivity(task.id, userId, ACTIVITY_TYPE.TASK_CREATED, `Created task "${title}"`);
+  // Core writes are atomic: a task must never exist without its creation audit
+  // entry (and a mid-step failure must not leave a half-written task).
+  const task = await prisma.$transaction(async (tx) => {
+    const created = await taskRepo.createTask(taskData, tx);
+    await taskRepo.createActivity(created.id, userId, ACTIVITY_TYPE.TASK_CREATED, `Created task "${title}"`, null, null, tx);
+    return created;
+  });
 
   // FOLLO ASSIGN — auto-add assignee to project if not already a member
   if (assigneeId) {
@@ -505,7 +491,7 @@ export async function updateTask(taskId, userId, body) {
     updateData.slaClockStartedAt = now;
   }
 
-  if (status === TASK_STATUS.COMPLETED && !task.actualEndDate && !actualEndDate) {
+  if (status === TASK_STATUS.DONE && !task.actualEndDate && !actualEndDate) {
     updateData.actualEndDate = new Date();
   }
 
@@ -688,18 +674,31 @@ export async function addDependency(taskId, userId, body) {
 
   checkManagerAccess(successor, userId);
 
-  if (await hasCircularDependency(taskId, predecessorId)) {
-    throw new ValidationError('This would create a circular dependency');
+  // Cycle-check + insert must be atomic: two reciprocal concurrent adds (A→B and
+  // B→A) can both pass an independent acyclic check and persist a 2-cycle. A
+  // Serializable transaction makes the predecessor-graph reads + the insert a
+  // single serializable unit, so one of the racing adds is aborted. Retry once on
+  // the serialization conflict (Prisma P2034) before surfacing it.
+  let dependency;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      dependency = await prisma.$transaction(async (tx) => {
+        if (await hasCircularDependency(taskId, predecessorId, new Set(), tx)) {
+          throw new ValidationError('This would create a circular dependency');
+        }
+        const existing = await taskRepo.findExistingDependency(taskId, predecessorId, tx);
+        if (existing) throw new ConflictError('Dependency already exists', ERROR_CODES.ALREADY_EXISTS);
+        return taskRepo.createDependency(
+          { successorId: taskId, predecessorId, lagDays: lagDays || 0 },
+          tx
+        );
+      }, { isolationLevel: 'Serializable' });
+      break;
+    } catch (err) {
+      if (err?.code === 'P2034' && attempt < 2) continue;
+      throw err;
+    }
   }
-
-  const existing = await taskRepo.findExistingDependency(taskId, predecessorId);
-  if (existing) throw new ConflictError('Dependency already exists', ERROR_CODES.ALREADY_EXISTS);
-
-  const dependency = await taskRepo.createDependency({
-    successorId: taskId,
-    predecessorId,
-    lagDays: lagDays || 0,
-  });
 
   await taskRepo.createActivity(
     taskId, userId,
@@ -798,6 +797,10 @@ export async function addComment(taskId, userId, body) {
   const comment = await taskRepo.createComment(commentData);
 
   invalidateCache(`task:${taskId}`);
+
+  // FOLLO PERF — broadcast the new comment to everyone viewing the task so it
+  // appears in real time instead of waiting for the next poll.
+  io.to(`project:${task.projectId}`).emit('task_comment_added', { taskId, comment });
 
   // Fire-and-forget side-effects
   const activityMsg = isMediaComment ? `Shared ${commentType.toLowerCase()}` : 'Added a comment';

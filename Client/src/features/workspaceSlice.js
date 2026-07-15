@@ -107,7 +107,54 @@ export const addWorkspaceMemberAsync = createAsyncThunk(
                 method: 'POST',
                 body: JSON.stringify({ workspaceId, email, role }),
             }, getToken);
-            return { workspaceId, member: result.data };
+            // result.data is { type: 'member'|'invitation', member?|invitation? }
+            return { workspaceId, result: result.data };
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
+// FOLLO MEMBERS — change a member's workspace role (ADMIN/MEMBER)
+export const updateWorkspaceMemberRoleAsync = createAsyncThunk(
+    'workspace/updateWorkspaceMemberRole',
+    async ({ workspaceId, userId, role, getToken }, { rejectWithValue }) => {
+        try {
+            const result = await apiCall(
+                `${API_V1}/workspaces/${workspaceId}/members/${userId}/role`,
+                { method: 'PATCH', body: JSON.stringify({ role }) },
+                getToken,
+            );
+            return { workspaceId, userId, role, member: result.data };
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
+// FOLLO MEMBERS — pending workspace invitations
+export const fetchWorkspaceInvitationsAsync = createAsyncThunk(
+    'workspace/fetchWorkspaceInvitations',
+    async ({ workspaceId, getToken }, { rejectWithValue }) => {
+        try {
+            const result = await apiCall(`${API_V1}/workspaces/${workspaceId}/invitations`, {}, getToken);
+            return result.data;
+        } catch (error) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
+export const revokeWorkspaceInvitationAsync = createAsyncThunk(
+    'workspace/revokeWorkspaceInvitation',
+    async ({ workspaceId, invitationId, getToken }, { rejectWithValue }) => {
+        try {
+            await apiCall(
+                `${API_V1}/workspaces/${workspaceId}/invitations/${invitationId}`,
+                { method: 'DELETE' },
+                getToken,
+            );
+            return { invitationId };
         } catch (error) {
             return rejectWithValue(error.message);
         }
@@ -269,6 +316,7 @@ const initialState = {
     // GET that started before a project was created can't overwrite the fresh Redux state.
     _latestWorkspacesRequestId: null,
     allUsers: [], // All system users (for admin invite dropdown)
+    pendingInvitations: [], // FOLLO MEMBERS — pending workspace invites (current workspace)
     loading: false,
     error: null,
     // Granular loading states for better UX
@@ -454,8 +502,23 @@ const workspaceSlice = createSlice({
                 // but absent from the server response. Keep local-only entries at the front so
                 // the user's current selection is never silently wiped by a stale cache hit.
                 const serverIds = new Set(serverList.map((w) => w.id));
-                const localOnly = (state.workspaces ?? []).filter((w) => !serverIds.has(w.id));
-                state.workspaces = [...localOnly, ...serverList];
+                const prevWorkspaces = state.workspaces ?? [];
+                const localOnly = prevWorkspaces.filter((w) => !serverIds.has(w.id));
+
+                // FOLLO WS-FIX: Deep-merge nested projects for workspaces present in BOTH
+                // lists. A project just created via POST may be absent from the ≤120s-cached
+                // server copy; without this the stale server workspace clobbers it wholesale
+                // (the previous guard only preserved entirely-missing workspaces).
+                const prevById = new Map(prevWorkspaces.map((w) => [w.id, w]));
+                const mergedServer = serverList.map((sw) => {
+                    const prev = prevById.get(sw.id);
+                    if (!prev || !Array.isArray(prev.projects) || !Array.isArray(sw.projects)) return sw;
+                    const serverProjIds = new Set(sw.projects.map((p) => p.id));
+                    const localOnlyProjects = prev.projects.filter((p) => !serverProjIds.has(p.id));
+                    if (localOnlyProjects.length === 0) return sw;
+                    return { ...sw, projects: [...sw.projects, ...localOnlyProjects] };
+                });
+                state.workspaces = [...localOnly, ...mergedServer];
 
                 // FOLLO BUGFIX-REFRESH: Don't blindly set isMemberView = false.
                 // Only disable member view if user is ADMIN/OWNER in some workspace.
@@ -588,9 +651,17 @@ const workspaceSlice = createSlice({
             })
             .addCase(addWorkspaceMemberAsync.fulfilled, (state, action) => {
                 state.loadingStates.members = false;
-                const { workspaceId, member } = action.payload;
+                const { workspaceId, result } = action.payload;
+                // Not-yet-signed-up person → a pending invitation, not a member.
+                if (result?.type === 'invitation' && result.invitation) {
+                    const exists = state.pendingInvitations.some((i) => i.id === result.invitation.id);
+                    if (!exists) state.pendingInvitations = [result.invitation, ...state.pendingInvitations];
+                    return;
+                }
+                const member = result?.member || result; // existing-user path
+                if (!member) return;
                 state.workspaces = state.workspaces.map((w) =>
-                    w.id === workspaceId 
+                    w.id === workspaceId
                         ? { ...w, members: [...(w.members || []), member] }
                         : w
                 );
@@ -601,6 +672,34 @@ const workspaceSlice = createSlice({
             .addCase(addWorkspaceMemberAsync.rejected, (state, action) => {
                 state.loadingStates.members = false;
                 state.error = action.payload;
+            })
+
+            // ━━━ Update Workspace Member Role (FOLLO MEMBERS) ━━━
+            .addCase(updateWorkspaceMemberRoleAsync.fulfilled, (state, action) => {
+                const { workspaceId, userId, role } = action.payload;
+                const setRole = (members) =>
+                    (members || []).map((m) =>
+                        (m.userId || m.user?.id) === userId ? { ...m, role } : m,
+                    );
+                state.workspaces = state.workspaces.map((w) =>
+                    w.id === workspaceId ? { ...w, members: setRole(w.members) } : w,
+                );
+                if (state.currentWorkspace?.id === workspaceId) {
+                    state.currentWorkspace.members = setRole(state.currentWorkspace.members);
+                }
+            })
+            .addCase(updateWorkspaceMemberRoleAsync.rejected, (state, action) => {
+                state.error = action.payload;
+            })
+
+            // ━━━ Workspace Invitations (FOLLO MEMBERS) ━━━
+            .addCase(fetchWorkspaceInvitationsAsync.fulfilled, (state, action) => {
+                state.pendingInvitations = action.payload || [];
+            })
+            .addCase(revokeWorkspaceInvitationAsync.fulfilled, (state, action) => {
+                state.pendingInvitations = state.pendingInvitations.filter(
+                    (i) => i.id !== action.payload.invitationId,
+                );
             })
             
             // ━━━ Create Project ━━━

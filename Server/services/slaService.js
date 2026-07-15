@@ -21,7 +21,6 @@ import {
   SLA_STATUS,
   SLA_EVENT_TYPE,
   calculateNetElapsedMs,
-  calculateSlaStatus,
   pauseClockData,
   resumeClockData,
   stopClockData,
@@ -52,6 +51,37 @@ function requirePMOrAdmin(userId, task) {
   if (!isPMOrAdmin(userId, task)) {
     throw new AuthorizationError('Only PM or workspace admin can perform this action');
   }
+}
+
+/**
+ * Status to resume the clock into. We never resume directly to BREACHED — the
+ * re-armed breach Inngest job owns the BREACHED transition and its side-effects
+ * (penalty, system comment, daily-overdue chain). Past-due or within-24h → AT_RISK.
+ */
+function resumedSlaStatus(dueDate, now = new Date()) {
+  if (!dueDate) return SLA_STATUS.HEALTHY;
+  const due = new Date(dueDate).getTime();
+  if (due - now.getTime() < 24 * 60 * 60 * 1000) return SLA_STATUS.AT_RISK;
+  return SLA_STATUS.HEALTHY;
+}
+
+/**
+ * Re-arm SLA warning + breach timers against a (possibly extended) deadline.
+ * When the clock was paused, any breach event that fired was skipped and never
+ * rescheduled — so a resumed past-due task would otherwise never breach. Sending
+ * a breach event with a `ts` in the past makes Inngest run it immediately, and
+ * onSlaBreach is idempotent (skips if already BREACHED) so re-arming is safe.
+ */
+async function rearmSlaTimers(taskId, dueDate, now = new Date()) {
+  if (!dueDate) return;
+  const due = new Date(dueDate);
+  const warn24 = new Date(due.getTime() - 24 * 60 * 60 * 1000);
+  const warn2 = new Date(due.getTime() - 2 * 60 * 60 * 1000);
+  const sends = [];
+  if (warn24 > now) sends.push(inngest.send({ name: 'follo/task.sla.warning.24hr', data: { taskId }, ts: warn24.getTime() }));
+  if (warn2 > now) sends.push(inngest.send({ name: 'follo/task.sla.warning.2hr', data: { taskId }, ts: warn2.getTime() }));
+  sends.push(inngest.send({ name: 'follo/task.sla.breach', data: { taskId }, ts: Math.max(due.getTime(), now.getTime()) }));
+  await Promise.allSettled(sends);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -150,18 +180,23 @@ export async function approveTask(taskId, userId) {
   const finalStatus = onTime ? SLA_STATUS.RESOLVED_ON_TIME : SLA_STATUS.RESOLVED_LATE;
   const clockData = stopClockData(task, now);
 
-  const updated = await slaRepo.updateTaskWithIncludes(taskId, {
-    approvedAt: now, approvedById: userId,
-    slaStatus: finalStatus, status: 'DONE',
-    actualEndDate: task.actualEndDate || now,
-    ...clockData,
+  // Core writes are atomic: the DONE transition and its APPROVED audit event must
+  // commit together. Scoring, the on-time counter, the system comment, and all
+  // notify/inngest/socket side-effects run outside the transaction.
+  const updated = await prisma.$transaction(async (tx) => {
+    const u = await slaRepo.updateTaskWithIncludes(taskId, {
+      approvedAt: now, approvedById: userId,
+      slaStatus: finalStatus, status: 'DONE',
+      actualEndDate: task.actualEndDate || now,
+      ...clockData,
+    }, tx);
+    await logSlaEvent(tx, { taskId, type: SLA_EVENT_TYPE.APPROVED, triggeredBy: userId, metadata: { onTime, early } });
+    return u;
   });
 
   // FOLLO INSTANT: bust task + project task list caches
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(updated.projectId));
-
-  await logSlaEvent(prisma, { taskId, type: SLA_EVENT_TYPE.APPROVED, triggeredBy: userId, metadata: { onTime, early } });
 
   if (early) {
     await updateContractorScore(prisma, task.assigneeId, taskId, 'EARLY_COMPLETION');
@@ -233,7 +268,8 @@ export async function rejectTask(taskId, userId, body) {
 
   const now = new Date();
   const clockData = resumeClockData(task, now);
-  const newSlaStatus = (task.dueDate && now > new Date(task.dueDate)) ? SLA_STATUS.BREACHED : SLA_STATUS.HEALTHY;
+  const effectiveDueDate = clockData.dueDate || task.dueDate;
+  const newSlaStatus = resumedSlaStatus(effectiveDueDate, now);
 
   const updated = await slaRepo.updateTaskWithIncludes(taskId, {
     rejectedAt: now, rejectedById: userId,
@@ -248,6 +284,7 @@ export async function rejectTask(taskId, userId, body) {
 
   await logSlaEvent(prisma, { taskId, type: SLA_EVENT_TYPE.REJECTED, triggeredBy: userId, metadata: { reason: reason.trim() } });
   await updateContractorScore(prisma, task.assigneeId, taskId, 'REJECTION');
+  await rearmSlaTimers(taskId, effectiveDueDate, now);
 
   const rejecterUser = await slaRepo.findUserById(userId);
   const rejecterName = rejecterUser?.name || 'Admin';
@@ -391,9 +428,8 @@ export async function resolveBlocker(taskId, userId, body) {
 
   const now = new Date();
   const clockData = resumeClockData(task, now);
-  const newSlaStatus = (task.dueDate && now > new Date(task.dueDate))
-    ? SLA_STATUS.BREACHED
-    : calculateSlaStatus({ ...task, slaStatus: SLA_STATUS.HEALTHY });
+  const effectiveDueDate = clockData.dueDate || task.dueDate;
+  const newSlaStatus = resumedSlaStatus(effectiveDueDate, now);
 
   const updated = await slaRepo.updateTaskWithIncludes(taskId, {
     blockerResolvedAt: now, blockerResolvedById: userId,
@@ -410,6 +446,7 @@ export async function resolveBlocker(taskId, userId, body) {
     taskId, type: SLA_EVENT_TYPE.BLOCKER_RESOLVED, triggeredBy: userId,
     metadata: { resolution, note: note.trim() },
   });
+  await rearmSlaTimers(taskId, effectiveDueDate, now);
 
   if (resolution === 'NEW_TASK' && newTask) {
     const { title, description: desc, assigneeId, dueDate } = newTask;
@@ -572,10 +609,15 @@ export async function requestExtension(taskId, userId, body) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_REQUESTED || 'EXTENSION_REQUESTED', userId, {
-    reason: reason.trim(),
-    proposedDate: proposed.toISOString(),
-    currentDueDate: task.dueDate?.toISOString(),
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_REQUESTED,
+    triggeredBy: userId,
+    metadata: {
+      reason: reason.trim(),
+      proposedDate: proposed.toISOString(),
+      currentDueDate: task.dueDate?.toISOString(),
+    },
   });
 
   const assigneeName = task.assignee?.name || 'Assignee';
@@ -630,9 +672,14 @@ export async function approveExtension(taskId, userId) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_APPROVED || 'EXTENSION_APPROVED', userId, {
-    newDueDate: task.extensionProposedDate?.toISOString(),
-    originalDueDate: task.extensionOriginalDueDate?.toISOString(),
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_APPROVED,
+    triggeredBy: userId,
+    metadata: {
+      newDueDate: task.extensionProposedDate?.toISOString(),
+      originalDueDate: task.extensionOriginalDueDate?.toISOString(),
+    },
   });
 
   const pmUser = await slaRepo.findUserById(userId);
@@ -685,8 +732,13 @@ export async function denyExtension(taskId, userId, body) {
   invalidateCache(CACHE_KEYS.task(taskId));
   invalidateCache(CACHE_KEYS.projectTasks(task.projectId));
 
-  await logSlaEvent(taskId, SLA_EVENT_TYPE.EXTENSION_DENIED || 'EXTENSION_DENIED', userId, {
-    reason: reason?.trim() || 'No reason provided',
+  await logSlaEvent(prisma, {
+    taskId,
+    type: SLA_EVENT_TYPE.EXTENSION_DENIED,
+    triggeredBy: userId,
+    metadata: {
+      reason: reason?.trim() || 'No reason provided',
+    },
   });
 
   const pmUser = await slaRepo.findUserById(userId);

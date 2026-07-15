@@ -9,7 +9,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useIsMobile } from '../hooks/useIsMobile';
 import { StatusBadge, SmartTimeLabel } from './gantt/GanttHelpers';
 import { getTimeOverdueShort, getTimeLeftShort } from '../lib/timeFormat';
-import { calcTaskContribution } from '../lib/completionCalc';
+import { calcTaskContribution, getTaskProgressPct } from '../lib/completionCalc';
 import { useDispatch } from "react-redux";
 import { useAuth } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
@@ -18,8 +18,8 @@ import { GripVertical, User, Calendar, ExternalLink, Lock, Search, Download, Che
 import { updateTaskAsync } from "../features/taskSlice";
 import useUserRole from "../hooks/useUserRole";
 import toast from "react-hot-toast";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+// html2canvas (~200KB) + jspdf (~386KB) are dynamically imported in the export
+// handlers below so they're only fetched when a user actually exports.
 
 // ─── GANTT CSS ANIMATIONS (injected once) ──────────
 const GANTT_STYLE = `
@@ -170,6 +170,10 @@ export default function ProjectGantt({ tasks, project }) {
     const [dragging, setDragging] = useState(null);
     const [selectedTask, setSelectedTask] = useState(null);
     const dragStartRef = useRef(null);
+    // Records the exact window listener references attached during an active drag
+    // so they can be detached if the component unmounts mid-drag (otherwise the
+    // mouse/touch move+up handlers leak onto window).
+    const attachedListenersRef = useRef(null);
     const { canCreateTasks } = useUserRole();
     // TASKK MOBILE
     const { isMobile } = useIsMobile();
@@ -287,6 +291,22 @@ export default function ProjectGantt({ tasks, project }) {
         }
     }, [startDate]);
 
+    // Detach any drag listeners still attached if we unmount mid-drag.
+    useEffect(() => {
+        return () => {
+            const a = attachedListenersRef.current;
+            if (!a) return;
+            if (a.kind === 'mouse') {
+                window.removeEventListener('mousemove', a.move);
+                window.removeEventListener('mouseup', a.up);
+            } else {
+                window.removeEventListener('touchmove', a.move);
+                window.removeEventListener('touchend', a.up);
+            }
+            attachedListenersRef.current = null;
+        };
+    }, []);
+
     // Calculate task bar position
     const getTaskPosition = (task) => {
         const taskStart = task.plannedStartDate ? startOfDay(new Date(task.plannedStartDate)) : 
@@ -323,6 +343,7 @@ export default function ProjectGantt({ tasks, project }) {
         setDragging({ taskId: task.id, type });
         window.addEventListener("mousemove", handleMouseMove);
         window.addEventListener("mouseup", handleMouseUp);
+        attachedListenersRef.current = { kind: 'mouse', move: handleMouseMove, up: handleMouseUp };
     };
 
     // TASKK MOBILE: Touch drag support (mirrors mouse drag)
@@ -339,6 +360,7 @@ export default function ProjectGantt({ tasks, project }) {
         setDragging({ taskId: task.id, type });
         window.addEventListener('touchmove', handleTouchMove, { passive: false });
         window.addEventListener('touchend', handleTouchEnd);
+        attachedListenersRef.current = { kind: 'touch', move: handleTouchMove, up: handleTouchEnd };
     };
 
     const handleTouchMove = (e) => {
@@ -368,6 +390,7 @@ export default function ProjectGantt({ tasks, project }) {
     const handleTouchEnd = async () => {
         window.removeEventListener('touchmove', handleTouchMove);
         window.removeEventListener('touchend', handleTouchEnd);
+        attachedListenersRef.current = null;
         if (dragStartRef.current?.newStart || dragStartRef.current?.newEnd) {
             const { task, newStart, newEnd } = dragStartRef.current;
             try {
@@ -420,6 +443,7 @@ export default function ProjectGantt({ tasks, project }) {
     const handleMouseUp = async () => {
         window.removeEventListener("mousemove", handleMouseMove);
         window.removeEventListener("mouseup", handleMouseUp);
+        attachedListenersRef.current = null;
 
         if (dragStartRef.current?.newStart || dragStartRef.current?.newEnd) {
             const { task, newStart, newEnd } = dragStartRef.current;
@@ -448,6 +472,7 @@ export default function ProjectGantt({ tasks, project }) {
         if (!ganttRef.current) return;
         setExporting(true);
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(ganttRef.current, {
                 scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
             });
@@ -470,6 +495,10 @@ export default function ProjectGantt({ tasks, project }) {
         if (!ganttRef.current) return;
         setExporting(true);
         try {
+            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                import('html2canvas'),
+                import('jspdf'),
+            ]);
             const canvas = await html2canvas(ganttRef.current, {
                 scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
             });
@@ -884,16 +913,26 @@ export default function ProjectGantt({ tasks, project }) {
                                                 <div style={{ position: 'absolute', top: 0, left: 0, width: '40%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.4),transparent)', animation: 'gantt-shimmer 2s ease-in-out infinite' }} />
                                             </div>
                                         )}
-                                        {/* Completion % overlay for IN_PROGRESS tasks with completionWeight */}
-                                        {state.isActive && task.completionWeight > 0 && (
-                                            <div style={{
-                                                position: 'absolute', left: 0, top: 0, height: '100%',
-                                                width: `${Math.min(100, task.completionWeight)}%`,
-                                                background: 'rgba(0,0,0,0.18)', borderRadius: 'inherit', pointerEvents: 'none',
-                                            }} />
-                                        )}
                                     </div>
                                 )}
+
+                                {/* FOLLO ENGINE — completion fill from subtask check-offs, drawn
+                                    across the planned bar so the Gantt mirrors project progress. */}
+                                {!state.isDone && (() => {
+                                    const pct = getTaskProgressPct(task);
+                                    if (pct <= 0) return null;
+                                    return (
+                                        <div
+                                            title={`${pct}% complete (subtasks)`}
+                                            style={{
+                                                position: 'absolute', left: Math.max(0, plannedStartX),
+                                                width: Math.max(0, plannedWidth * (pct / 100)), height: BAR_H,
+                                                background: 'rgba(22,163,74,0.55)', borderRadius: 3,
+                                                pointerEvents: 'none', zIndex: 1,
+                                            }}
+                                        />
+                                    );
+                                })()}
 
                                 {/* Overdue spill (red extension) — non-DONE only */}
                                 {!state.isDone && state.isOverdue && clampedSpillWidth > 0 && (
@@ -1054,7 +1093,7 @@ export default function ProjectGantt({ tasks, project }) {
                             </div>
                         </div>
                         <button
-                            onClick={() => navigate(`/task?id=${selectedTask.id}`)}
+                            onClick={() => navigate(`/taskDetails?projectId=${project?.id ?? selectedTask.projectId}&taskId=${selectedTask.id}`)}
                             className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 transition"
                         >
                             <ExternalLink className="size-3" />

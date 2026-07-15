@@ -31,6 +31,8 @@ import {
   ERROR_CODES 
 } from "../utils/constants.js";
 import emailService from "../utils/emailService.js";
+import { requireProjectManager } from "../utils/permissions.js"; // FOLLO ENGINE
+import { getProjectCostRollup } from "../services/subtaskService.js"; // FOLLO ENGINE
 import { withCache, invalidateCachePattern, invalidateCache, CACHE_KEYS, CACHE_TTL } from "../lib/cache.js";
 import { userSelect, taskListSelect, memberSelect, projectListSelect } from "../lib/selectShapes.js";
 import { io } from "../server.js";
@@ -139,56 +141,41 @@ export const getMyProjects = asyncHandler(async (req, res) => {
         workspace: { select: { id: true, name: true, slug: true } },
       };
 
-      // FOLLO ACCESS: Admin workspaces — get ALL projects
-      const adminProjects = adminWorkspaceIds.length > 0
-        ? await prisma.project.findMany({
-            where: { workspaceId: { in: adminWorkspaceIds } },
-            select: projectSelect,
-            orderBy: { createdAt: 'desc' },
-          })
-        : [];
+      // FOLLO PERF: collect the accessible project IDs with lightweight (id-only)
+      // queries first, then fetch the heavy task-laden payload exactly ONCE. The
+      // previous version ran the heavy `projectSelect` 2-3× over overlapping sets
+      // and merged in JS.
+      // - Admin workspaces: ALL projects
+      // - Member workspaces: projects where the user is a ProjectMember OR has an
+      //   assigned task
+      const [adminIdRows, memberByMembershipRows, memberByAssignmentRows] = await Promise.all([
+        adminWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: adminWorkspaceIds } }, select: { id: true } })
+          : Promise.resolve([]),
+        memberWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: memberWorkspaceIds }, members: { some: { userId } } }, select: { id: true } })
+          : Promise.resolve([]),
+        memberWorkspaceIds.length > 0
+          ? prisma.project.findMany({ where: { workspaceId: { in: memberWorkspaceIds }, tasks: { some: { assigneeId: userId } } }, select: { id: true } })
+          : Promise.resolve([]),
+      ]);
 
-      // FOLLO ACCESS: Member workspaces — only projects where user is a
-      // ProjectMember OR has at least one assigned task
-      let memberProjects = [];
-      if (memberWorkspaceIds.length > 0) {
-        const [byMembership, byAssignment] = await Promise.all([
-          prisma.project.findMany({
-            where: {
-              workspaceId: { in: memberWorkspaceIds },
-              members: { some: { userId } },
-            },
-            select: projectSelect,
-          }),
-          prisma.project.findMany({
-            where: {
-              workspaceId: { in: memberWorkspaceIds },
-              tasks: { some: { assigneeId: userId } },
-            },
-            select: projectSelect,
-          }),
-        ]);
+      const projectIds = [...new Set(
+        [...adminIdRows, ...memberByMembershipRows, ...memberByAssignmentRows].map(p => p.id)
+      )];
 
-        const seen = new Set();
-        memberProjects = [...byMembership, ...byAssignment].filter(p => {
-          if (seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        });
-      }
+      if (projectIds.length === 0) return [];
 
-      // Merge admin + member projects, deduplicate
-      const seen = new Set();
-      return [...adminProjects, ...memberProjects]
-        .filter(p => {
-          if (seen.has(p.id)) return false;
-          seen.add(p.id);
-          return true;
-        })
-        .map(p => {
-          const pm = p.members?.find(m => m.userId === userId);
-          return { ...p, myRole: pm?.role || 'MEMBER' };
-        });
+      const accessibleProjects = await prisma.project.findMany({
+        where:   { id: { in: projectIds } },
+        select:  projectSelect,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return accessibleProjects.map(p => {
+        const pm = p.members?.find(m => m.userId === userId);
+        return { ...p, myRole: pm?.role || 'MEMBER' };
+      });
     }
   );
 
@@ -226,12 +213,19 @@ export const getProjectById = asyncHandler(async (req, res) => {
     throw new NotFoundError('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
   }
 
-  // Check workspace membership OR project membership
-  const isWorkspaceMember = project.workspace.members.some(m => m.userId === userId);
-  const isProjectMember = project.members.some(m => m.userId === userId);
+  // FOLLO SECURITY — align single-project read with requireProjectAccess: the
+  // owner, an ACTIVE project member, or a workspace ADMIN may view it. Plain
+  // (non-admin) workspace members who are not on the project are denied — this
+  // matches getMyProjects (which never surfaces such projects) and closes a
+  // direct-URL IDOR that previously exposed every project's tasks, comment
+  // threads and member emails to any workspace member.
+  const wsMembership = project.workspace.members.find(m => m.userId === userId);
+  const isWorkspaceAdmin = wsMembership?.role === WORKSPACE_ROLES.ADMIN;
+  const projMembership = project.members.find(m => m.userId === userId);
+  const isActiveProjectMember = !!projMembership && projMembership.isActive !== false;
   const isOwner = project.ownerId === userId;
 
-  if (!isWorkspaceMember && !isProjectMember && !isOwner) {
+  if (!isWorkspaceAdmin && !isActiveProjectMember && !isOwner) {
     throw new AuthorizationError(
       'Not authorized to view this project',
       ERROR_CODES.INSUFFICIENT_PERMISSIONS
@@ -250,6 +244,32 @@ export const getProjectById = asyncHandler(async (req, res) => {
   });
 
   sendSuccess(res, { ...project, recentActivity });
+});
+
+/**
+ * Project cost rollup — budget vs committed (approved quotes) vs actual.
+ * FOLLO ENGINE. Manager-only: pricing stays confidential from the field.
+ * GET /api/v1/projects/:projectId/cost-summary
+ */
+export const getProjectCostSummary = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+
+  // Throws AuthorizationError for non-managers.
+  const { project } = await requireProjectManager(userId, projectId);
+
+  const rollup = await getProjectCostRollup(projectId);
+  const budget = project?.budget != null ? Number(project.budget) : null;
+  const remaining = budget != null ? budget - rollup.committed : null;
+
+  sendSuccess(res, {
+    budget,
+    committed: rollup.committed,
+    actual: rollup.actual,
+    remaining,
+    overBudget: budget != null && rollup.committed > budget,
+    subtaskCount: rollup.subtaskCount,
+  });
 });
 
 /**
@@ -939,8 +959,32 @@ export const addPinnedLink = asyncHandler(async (req, res) => {
   const { projectId } = req.params;
   const { label, url, icon } = req.body;
   if (!label?.trim() || !url?.trim()) throw new ValidationError('Label and URL are required');
+
+  // FOLLO SECURITY — only authorized members may pin links (was unprotected).
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: {
+      members: { select: { userId: true } },
+      workspace: { include: { members: { select: { userId: true, role: true } } } },
+    },
+  });
+  if (!project) throw new NotFoundError('Project not found');
+
+  const isProjectMember = project.members.some(m => m.userId === userId);
+  const isWorkspaceAdmin = project.workspace.members.some(m => m.userId === userId && m.role === 'ADMIN');
+  const isOwner = project.ownerId === userId;
+  if (!isProjectMember && !isWorkspaceAdmin && !isOwner) {
+    throw new AuthorizationError('Not authorized to add pinned links');
+  }
+
+  // FOLLO SECURITY — only allow http(s) links (block javascript:, data:, etc.).
+  const trimmedUrl = url.trim();
+  if (!/^https?:\/\//i.test(trimmedUrl)) {
+    throw new ValidationError('Link URL must start with http:// or https://');
+  }
+
   const link = await prisma.projectLink.create({
-    data: { projectId, label: label.trim(), url: url.trim(), icon: icon || null, pinnedBy: userId },
+    data: { projectId, label: label.trim(), url: trimmedUrl, icon: icon || null, pinnedBy: userId },
   });
   return sendCreated(res, link, 'Link added');
 });

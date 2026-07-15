@@ -31,6 +31,8 @@ export const taskListSelect = {
   assigneeId: true,
   projectId: true,
   completionWeight: true,
+  breakdownStatus: true, // FOLLO ENGINE
+  subtasks: { select: { completionWeight: true, isComplete: true } }, // FOLLO ENGINE — Gantt fill
   extensionStatus: true,
   extensionRequestedAt: true,
   isDelayed: true,

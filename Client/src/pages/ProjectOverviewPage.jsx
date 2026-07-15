@@ -5,6 +5,7 @@ import { useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeftIcon } from "lucide-react";
 import ProjectOverview from "../components/project/ProjectOverview";
+import ProjectBudgetCard from "../components/project/ProjectBudgetCard"; // FOLLO ENGINE
 import EmptyState from "../components/EmptyState";
 import useUserRole from "../hooks/useUserRole";
 
@@ -56,6 +57,7 @@ export default function ProjectOverviewPage() {
                 <span className="text-xs text-zinc-400 dark:text-zinc-500">Overview</span>
             </div>
 
+            <ProjectBudgetCard projectId={project.id} />
             <ProjectOverview project={project} />
         </div>
     );

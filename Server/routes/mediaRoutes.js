@@ -7,11 +7,38 @@
 
 import express from "express";
 import { createSignedUploadUrl, deleteMediaFile, MEDIA_CONFIG, isR2Configured } from "../lib/r2.js";
-import { createMuxUpload, getMuxAsset, deleteMuxAsset, isMuxConfigured } from "../lib/mux.js";
-import { asyncHandler, ValidationError } from "../utils/errors.js";
+import { createMuxUpload, getMuxAsset, deleteMuxAsset, isMuxConfigured, getPlaybackInfo } from "../lib/mux.js";
+import { asyncHandler, ValidationError, AuthorizationError } from "../utils/errors.js";
 import { sendSuccess, sendCreated } from "../utils/response.js";
+import prisma from "../configs/prisma.js";
+import { requireProjectAccess } from "../utils/permissions.js";
+import { PROJECT_ROLES } from "../utils/constants.js";
+import { mediaLimiter } from "../middlewares/rateLimiter.js";
 
 const router = express.Router();
+
+// FOLLO SECURITY — only the uploader of the media (the comment author) or a
+// project manager/owner may delete it. Looks up the owning comment by its R2
+// fileKey or Mux assetId and enforces access on the parent project.
+async function assertMediaDeletePermission(userId, { fileKey, assetId }) {
+  const comment = await prisma.comment.findFirst({
+    where: assetId ? { muxAssetId: assetId } : { fileKey },
+    select: { userId: true, task: { select: { projectId: true } } },
+  });
+
+  // No comment references this media — refuse rather than allow blind deletes.
+  if (!comment) {
+    throw new AuthorizationError("Media not found or you do not have permission to delete it");
+  }
+
+  if (comment.userId === userId) return;
+
+  const access = await requireProjectAccess(userId, comment.task.projectId);
+  const managerRoles = [PROJECT_ROLES.OWNER, PROJECT_ROLES.MANAGER];
+  if (!managerRoles.includes(access.role)) {
+    throw new AuthorizationError("Only the uploader or a project manager can delete this media");
+  }
+}
 
 // ─── POST /api/v1/media/sign ───────────────────────────────────────────────
 // Get a signed R2 upload URL for images, audio, or files
@@ -19,8 +46,9 @@ const router = express.Router();
 // Response: { uploadUrl, fileKey, cdnUrl }
 router.post(
   "/sign",
+  mediaLimiter,
   asyncHandler(async (req, res) => {
-    const { mediaType, mimeType, sizeBytes } = req.body;
+    const { mediaType, mimeType, sizeBytes, projectId } = req.body;
 
     // Validate required fields
     if (!mediaType || !mimeType || !sizeBytes) {
@@ -28,6 +56,13 @@ router.post(
         "Missing required fields: mediaType, mimeType, sizeBytes"
       );
     }
+
+    // Object-level authz: only mint an upload URL for a project the caller can
+    // access (prevents any authed user minting unlimited presigned PUTs).
+    if (!projectId) {
+      throw new ValidationError("projectId is required");
+    }
+    await requireProjectAccess(req.userId, projectId);
 
     // Block video — use /sign/video instead (Mux handles encoding)
     if (mediaType === "video") {
@@ -58,7 +93,16 @@ router.post(
 // Response: { uploadUrl, uploadId }
 router.post(
   "/sign/video",
+  mediaLimiter,
   asyncHandler(async (req, res) => {
+    const { projectId } = req.body || {};
+
+    // Object-level authz: only mint a Mux upload for a project the caller can access.
+    if (!projectId) {
+      throw new ValidationError("projectId is required");
+    }
+    await requireProjectAccess(req.userId, projectId);
+
     // Check Mux is configured
     if (!isMuxConfigured()) {
       throw new ValidationError("Video uploads are not configured on this server");
@@ -95,7 +139,8 @@ router.get(
 // ─── DELETE /api/v1/media/:fileKey ─────────────────────────────────────────
 // Delete a file from R2 or Mux
 // Body: { assetId? } — only for video (Mux)
-// Note: Caller should verify ownership before calling this
+// FOLLO SECURITY — ownership is enforced: only the uploader or a project
+// manager/owner of the media's parent task may delete it.
 router.delete(
   "/:fileKey",
   asyncHandler(async (req, res) => {
@@ -107,6 +152,7 @@ router.delete(
       if (!isMuxConfigured()) {
         throw new ValidationError("Video service is not configured");
       }
+      await assertMediaDeletePermission(req.userId, { assetId });
       await deleteMuxAsset(assetId);
       return sendSuccess(res, { deleted: true, type: "video" });
     }
@@ -120,9 +166,34 @@ router.delete(
       throw new ValidationError("Media storage is not configured");
     }
 
+    await assertMediaDeletePermission(req.userId, { fileKey });
     await deleteMediaFile(fileKey);
 
     sendSuccess(res, { deleted: true, type: "file", fileKey });
+  })
+);
+
+// ─── GET /api/v1/media/playback/:playbackId ────────────────────────────────
+// Mint ready-to-play (public or short-lived signed) Mux URLs at VIEW time.
+// Authz: the playback ID must belong to a comment whose parent project the
+// caller can access — so signed media can't be streamed cross-tenant.
+router.get(
+  "/playback/:playbackId",
+  asyncHandler(async (req, res) => {
+    const { playbackId } = req.params;
+    if (!playbackId) throw new ValidationError("playbackId is required");
+
+    const comment = await prisma.comment.findFirst({
+      where: { muxPlaybackId: playbackId },
+      select: { task: { select: { projectId: true } } },
+    });
+    if (!comment?.task?.projectId) {
+      throw new AuthorizationError("Media not found or you do not have permission to view it");
+    }
+    await requireProjectAccess(req.userId, comment.task.projectId);
+
+    const info = await getPlaybackInfo(playbackId);
+    sendSuccess(res, info);
   })
 );
 

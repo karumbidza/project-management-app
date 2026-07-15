@@ -2,6 +2,11 @@
 // FOLLO SECURITY
 import prisma from "../configs/prisma.js";
 import { clerkClient } from "@clerk/express";
+import { cache } from "../lib/cache.js";
+import { processPendingInvitationsForUser } from "../utils/invitations.js";
+
+// How long to trust that a user has been synced to our DB before re-checking.
+const USER_SYNC_TTL = 300; // 5 minutes
 
 // Ensure user exists in database when they make any authenticated request
 const ensureUserInDb = async (userId) => {
@@ -76,13 +81,35 @@ const ensureUserInDb = async (userId) => {
                 throw error;
             }
         }
+
+        // We just created (or migrated) this user's row. Accept any workspace/
+        // project invitations sent to their email BEFORE they had an account —
+        // otherwise an invitee who opens the app never joins, because the Clerk
+        // webhook that used to be the only acceptance path skips already-synced
+        // users. Never let this block authentication.
+        if (user) {
+            try {
+                await processPendingInvitationsForUser(user);
+            } catch (error) {
+                console.error(JSON.stringify({ level: 'error', event: 'auth.invitations.failed', userId, error: error.message }));
+            }
+        }
     }
     return user;
 };
 
+// FOLLO TESTS / FOLLO SECURITY — the x-test-user-id header bypasses Clerk auth.
+// It is gated so it can NEVER run in a deployed environment: it requires both
+// NODE_ENV==='test' AND the JEST_WORKER_ID that Jest sets only inside its worker
+// processes (never present in a real server). Evaluated once at module load so a
+// later env mutation can't flip it on.
+const TEST_AUTH_ENABLED =
+    process.env.NODE_ENV === 'test' &&
+    process.env.NODE_ENV !== 'production' &&
+    Boolean(process.env.JEST_WORKER_ID);
+
 export const protect = async (req, res, next) => {
-    // FOLLO TESTS — bypass Clerk in test environment
-    if (process.env.NODE_ENV === 'test' && req.headers['x-test-user-id']) {
+    if (TEST_AUTH_ENABLED && req.headers['x-test-user-id']) {
         const testUserId = req.headers['x-test-user-id'];
         req.auth = async () => ({ userId: testUserId });
         req.userId = testUserId;
@@ -95,9 +122,15 @@ export const protect = async (req, res, next) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         
-        // Auto-create user in our database if they don't exist
-        await ensureUserInDb(userId);
-        
+        // Auto-create user in our database if they don't exist. Cache the
+        // "already synced" flag for a few minutes so we don't run a user lookup
+        // on every single authenticated request (one DB round-trip per request).
+        const syncKey = `user-synced:${userId}`;
+        if (!cache.get(syncKey)) {
+            await ensureUserInDb(userId);
+            cache.set(syncKey, true, USER_SYNC_TTL);
+        }
+
         // Attach userId to request for downstream use
         req.userId = userId;
         return next();

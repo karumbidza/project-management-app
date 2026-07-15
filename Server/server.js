@@ -20,7 +20,8 @@ import { Server as SocketServer } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
 import 'dotenv/config';
-import { clerkMiddleware } from '@clerk/express';
+import { clerkMiddleware, verifyToken } from '@clerk/express';
+import { requireProjectAccess } from './utils/permissions.js';
 import { serve } from "inngest/express";
 import { inngest, functions } from "./inngest/index.js";
 import { v4 as uuidv4 } from 'uuid';
@@ -32,6 +33,7 @@ import taskRouter from './routes/taskRoutes.js';
 import webhookRouter from './routes/webhookRoutes.js';
 import mediaRouter from './routes/mediaRoutes.js';
 import taskSlaRouter from './routes/taskSlaRoutes.js';
+import subtaskRouter from './routes/subtaskRoutes.js';
 import templateRouter from './routes/templateRoutes.js';
 import notificationRouter from './routes/notificationRoutes.js';
 
@@ -41,7 +43,11 @@ import { errorHandler, notFoundHandler } from './utils/errors.js';
 import { responseTimeLogger } from './middlewares/perfMiddleware.js';
 import { apiLimiter } from './middlewares/rateLimiter.js';
 import { sanitiseBody } from './middlewares/sanitise.js';
+import { validateEnv } from './configs/validateEnv.js';
 import prisma from './configs/prisma.js';
+
+// Fail fast on missing/invalid required env vars before binding anything.
+validateEnv();
 
 const app = express();
 const httpServer = createServer(app);
@@ -67,17 +73,53 @@ export const io = new SocketServer(httpServer, {
 
 app.set('io', io); // FOLLO PROJECT-OVERVIEW — make io available to controllers
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FOLLO SECURITY — Socket.IO authentication
+// Every connection must present a valid Clerk JWT (sent by the client via
+// handshake.auth.token). Without this, any client could join arbitrary
+// project rooms and receive another tenant's real-time task/chat events.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('UNAUTHORIZED'));
+
+    const claims = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+    if (!claims?.sub) return next(new Error('UNAUTHORIZED'));
+
+    socket.userId = claims.sub;
+    return next();
+  } catch {
+    return next(new Error('UNAUTHORIZED'));
+  }
+});
+
 io.on('connection', (socket) => {
-  // Project-level rooms — join when user opens a project
-  socket.on('join_project', (projectId) => {
-    if (typeof projectId === 'string' && projectId.length > 0) {
+  // Project-level rooms — join only after verifying the authenticated user
+  // actually has access to the project (prevents cross-tenant room joins).
+  socket.on('join_project', async (projectId) => {
+    if (typeof projectId !== 'string' || projectId.length === 0) return;
+    try {
+      const access = await requireProjectAccess(socket.userId, projectId);
       socket.join(`project:${projectId}`);
+      // Project chat is OWNER/MANAGER-only (incl. workspace admins, who get
+      // MANAGER access). They also join a private managers room so chat events
+      // are delivered only to them — never broadcast to the whole project room.
+      if (access.role === 'OWNER' || access.role === 'MANAGER') {
+        socket.join(`project:${projectId}:managers`);
+      }
+      socket.emit('join_project_ok', { projectId });
+    } catch {
+      socket.emit('join_project_denied', { projectId });
     }
   });
 
   socket.on('leave_project', (projectId) => {
     if (typeof projectId === 'string' && projectId.length > 0) {
       socket.leave(`project:${projectId}`);
+      socket.leave(`project:${projectId}:managers`);
     }
   });
 });
@@ -240,7 +282,14 @@ app.get('/api/v1/health', async (req, res) => {
 // INNGEST (Background Jobs) — skips rate limiting
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.use("/api/inngest", serve({ client: inngest, functions }));
+// Pass the signing key explicitly so Inngest verifies the signature on every
+// inbound job request. In production the serve handler refuses unsigned requests
+// (env validation requires INNGEST_SIGNING_KEY before boot).
+app.use("/api/inngest", serve({
+  client: inngest,
+  functions,
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+}));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // API ROUTES (v1) — FOLLO SECURITY
@@ -254,15 +303,14 @@ app.use('/api/v1/workspaces',    protect, workspaceRouter);
 app.use('/api/v1/projects',      protect, projectRouter);
 app.use('/api/v1/tasks',         protect, taskRouter);
 app.use('/api/v1/tasks',         protect, taskSlaRouter);  // FOLLO SLA routes
+app.use('/api/v1/tasks',         protect, subtaskRouter);  // FOLLO ENGINE breakdown/subtasks
 app.use('/api/v1/templates',     protect, templateRouter); // FOLLO SLA Phase 7
 app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
 app.use('/api/v1/media',         protect, mediaRouter);
 
-// FOLLO AUDIT — Legacy unversioned routes kept for backwards compat; prefer /api/v1/
-// Legacy routes (for backward compatibility - will be deprecated)
-app.use('/api/workspaces', protect, workspaceRouter);
-app.use('/api/projects',   protect, projectRouter);
-app.use('/api/tasks',      protect, taskRouter);
+// NOTE: legacy unversioned mounts (/api/workspaces|projects|tasks) were removed —
+// they were a parallel, less-tested copy of the same routers (extra attack
+// surface). All clients use /api/v1/*.
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ERROR HANDLING — FOLLO SECURITY + FOLLO PERF-2

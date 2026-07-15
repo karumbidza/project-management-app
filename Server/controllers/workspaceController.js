@@ -23,7 +23,9 @@ import {
 import {
   sendSuccess,
   sendCreated,
+  sendNoContent,
 } from "../utils/response.js";
+import { requireWorkspaceAdmin } from "../utils/permissions.js"; // FOLLO MEMBERS
 import { ensureUserExists, getUserByEmail } from "../utils/userService.js";
 import { WORKSPACE_ROLES, LIMITS, ERROR_CODES } from "../utils/constants.js";
 import emailService from "../utils/emailService.js";
@@ -255,30 +257,24 @@ export const addMemberToWorkspace = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();
   const { email, role, workspaceId, message } = req.body;
 
-  // Find user by email
-  const userToAdd = await getUserByEmail(email);
-  if (!userToAdd) {
-    throw new NotFoundError(
-      'User not found. They must sign up first before being invited.',
-      ERROR_CODES.USER_NOT_FOUND
-    );
+  const normalizedEmail = (email || '').toLowerCase().trim();
+  if (!normalizedEmail) {
+    throw new ValidationError('Email is required', ERROR_CODES.VALIDATION_ERROR);
   }
+  const wsRole = role === WORKSPACE_ROLES.ADMIN ? WORKSPACE_ROLES.ADMIN : WORKSPACE_ROLES.MEMBER;
 
-  // Fetch workspace with members
+  // Fetch workspace with members and authorise the requester FIRST.
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     include: { members: true },
   });
-
   if (!workspace) {
     throw new NotFoundError('Workspace not found', ERROR_CODES.WORKSPACE_NOT_FOUND);
   }
 
-  // Check if requester is admin
   const requesterMember = workspace.members.find(
     (m) => m.userId === userId && m.role === WORKSPACE_ROLES.ADMIN
   );
-  
   if (!requesterMember) {
     throw new AuthorizationError(
       'Only workspace admins can add members',
@@ -286,16 +282,6 @@ export const addMemberToWorkspace = asyncHandler(async (req, res) => {
     );
   }
 
-  // Check if already a member
-  const existingMember = workspace.members.find((m) => m.userId === userToAdd.id);
-  if (existingMember) {
-    throw new ConflictError(
-      'User is already a member of this workspace',
-      ERROR_CODES.ALREADY_EXISTS
-    );
-  }
-
-  // Check member limit
   if (workspace.members.length >= LIMITS.MAX_MEMBERS_PER_WORKSPACE) {
     throw new ConflictError(
       `Maximum ${LIMITS.MAX_MEMBERS_PER_WORKSPACE} members allowed per workspace`,
@@ -303,32 +289,124 @@ export const addMemberToWorkspace = asyncHandler(async (req, res) => {
     );
   }
 
-  // Add member
-  const member = await prisma.workspaceMember.create({
-    data: {
-      userId: userToAdd.id,
+  const inviter = await prisma.user.findUnique({ where: { id: userId } });
+  const userToAdd = await getUserByEmail(normalizedEmail);
+
+  // ── CASE 1: the person already has an account → add them straight away ──
+  if (userToAdd) {
+    const existingMember = workspace.members.find((m) => m.userId === userToAdd.id);
+    if (existingMember) {
+      throw new ConflictError(
+        'User is already a member of this workspace',
+        ERROR_CODES.ALREADY_EXISTS
+      );
+    }
+
+    const member = await prisma.workspaceMember.create({
+      data: { userId: userToAdd.id, workspaceId, role: wsRole, message: message || null },
+      include: { user: true },
+    });
+
+    // Mark any pending workspace invite for this email as accepted.
+    await prisma.invitation.updateMany({
+      where: { email: normalizedEmail, workspaceId, status: 'PENDING' },
+      data: { status: 'ACCEPTED', acceptedAt: new Date() },
+    });
+
+    emailService.sendWorkspaceInvite({
+      to: userToAdd.email,
+      inviteeName: userToAdd.name,
+      workspaceName: workspace.name,
+      inviterName: inviter?.name || 'A team member',
+      role: wsRole,
+    }).catch(err => console.error('[Email] Failed to send workspace invite:', err));
+
+    // Bust the cached workspace list for the new member AND every existing
+    // member (incl. the inviting admin). getUserWorkspaces caches per-user, so
+    // without this the admin's own dashboard and task assign dropdown keep
+    // showing the stale roster — missing the person they just added — until the
+    // cache TTL expires.
+    const affectedUserIds = new Set([
+      userToAdd.id,
+      ...workspace.members.map((m) => m.userId),
+    ]);
+    for (const uid of affectedUserIds) {
+      invalidateCachePattern(CACHE_KEYS.userWorkspaces(uid));
+    }
+    invalidateCachePattern(CACHE_KEYS.userProjects(userToAdd.id));
+
+    return sendCreated(res, { type: 'member', member }, 'Member added to workspace');
+  }
+
+  // ── CASE 2: no account yet → create a pending invitation by email ──
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const invitation = await prisma.invitation.upsert({
+    where: { email_workspaceId: { email: normalizedEmail, workspaceId } },
+    update: { workspaceRole: wsRole, status: 'PENDING', invitedById: userId, expiresAt, message: message || null },
+    create: {
+      email: normalizedEmail,
       workspaceId,
-      role: role || WORKSPACE_ROLES.MEMBER,
+      workspaceRole: wsRole,
+      invitedById: userId,
+      expiresAt,
       message: message || null,
     },
-    include: { user: true },
   });
 
-  // Send notification email
-  const inviter = await prisma.user.findUnique({ where: { id: userId } });
   emailService.sendWorkspaceInvite({
-    to: userToAdd.email,
-    inviteeName: userToAdd.name,
+    to: normalizedEmail,
+    inviteeName: normalizedEmail,
     workspaceName: workspace.name,
     inviterName: inviter?.name || 'A team member',
-    role: role || WORKSPACE_ROLES.MEMBER,
+    role: wsRole,
+    pending: true,
   }).catch(err => console.error('[Email] Failed to send workspace invite:', err));
 
-  // FOLLO INSTANT: Invalidate workspace and project caches for the newly added member
-  invalidateCachePattern(CACHE_KEYS.userWorkspaces(userToAdd.id));
-  invalidateCachePattern(CACHE_KEYS.userProjects(userToAdd.id));
+  return sendCreated(
+    res,
+    { type: 'invitation', invitation },
+    'Invitation sent — they will join once they sign up with this email'
+  );
+});
 
-  sendCreated(res, member, 'Member added to workspace successfully');
+/**
+ * List pending workspace invitations (admin only).
+ * GET /api/v1/workspaces/:workspaceId/invitations
+ * FOLLO MEMBERS.
+ */
+export const getWorkspaceInvitations = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId } = req.params;
+  await requireWorkspaceAdmin(userId, workspaceId);
+
+  const invitations = await prisma.invitation.findMany({
+    where: { workspaceId, status: 'PENDING' },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true, email: true, workspaceRole: true, status: true,
+      createdAt: true, expiresAt: true,
+      invitedBy: { select: { id: true, name: true } },
+    },
+  });
+  sendSuccess(res, invitations);
+});
+
+/**
+ * Revoke a pending workspace invitation (admin only).
+ * DELETE /api/v1/workspaces/:workspaceId/invitations/:invitationId
+ * FOLLO MEMBERS.
+ */
+export const revokeWorkspaceInvitation = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const { workspaceId, invitationId } = req.params;
+  await requireWorkspaceAdmin(userId, workspaceId);
+
+  const invitation = await prisma.invitation.findUnique({ where: { id: invitationId } });
+  if (!invitation || invitation.workspaceId !== workspaceId) {
+    throw new NotFoundError('Invitation', ERROR_CODES.NOT_FOUND_ERROR);
+  }
+  await prisma.invitation.delete({ where: { id: invitationId } });
+  sendNoContent(res);
 });
 
 /**

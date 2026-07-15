@@ -101,6 +101,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (isSubmitting) return; // guard against double-submit (Enter + click / rapid clicks)
 
         if (!formData.title.trim()) {
             toast.error("Task title is required");
