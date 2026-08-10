@@ -17,7 +17,7 @@ import { ArrowLeftIcon, PlusIcon, FolderDown } from "lucide-react";
 import ProjectSettings from "../components/ProjectSettings";
 import CreateTaskDialog from "../components/CreateTaskDialog";
 import ApplyTemplateDialog from "../components/ApplyTemplateDialog";
-import ProjectCalendar from "../components/ProjectCalendar";
+import CalendarView from "../components/CalendarView"; // FOLLO CALENDAR — upgraded calendar
 import ProjectTasks from "../components/ProjectTasks";
 import ProjectGantt from "../components/ProjectGantt";
 import useUserRole from "../hooks/useUserRole";
@@ -206,7 +206,7 @@ export default function ProjectDetail() {
             <div>
                 {tab === "tasks"     && <ProjectTasks tasks={tasks} projectId={id} />}
                 {tab === "gantt"     && <ProjectGantt tasks={tasks} project={project} />}
-                {tab === "calendar"  && <ProjectCalendar tasks={tasks} />}
+                {tab === "calendar"  && <CalendarView scope="project" projectId={id} />}
                 {tab === "settings"  && <ProjectSettings project={project} />}
             </div>
 

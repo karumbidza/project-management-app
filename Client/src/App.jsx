@@ -16,6 +16,7 @@ const TaskDetails = lazy(() => import("./pages/TaskDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Reports = lazy(() => import("./pages/Reports"));
 const MyTasks = lazy(() => import("./pages/MyTasks"));
+const Calendar = lazy(() => import("./pages/Calendar")); // FOLLO CALENDAR
 const AccessRevoked = lazy(() => import("./pages/AccessRevoked"));
 const ProjectOverviewPage = lazy(() => import("./pages/ProjectOverviewPage")); // FOLLO NAV
 
@@ -48,6 +49,12 @@ const App = () => {
                             <MyTasks />
                         </Suspense>
                     } />
+                    <Route path="calendar" element={
+                        <Suspense fallback={<PageLoader />}>
+                            <Calendar />
+                        </Suspense>
+                    } />
+
                     <Route path="team" element={
                         <Suspense fallback={<PageLoader />}>
                             <Team />

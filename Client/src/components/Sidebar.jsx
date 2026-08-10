@@ -5,7 +5,7 @@ import { NavLink } from 'react-router-dom'
 import MyTasksSidebar from './MyTasksSidebar'
 import ProjectSidebar from './ProjectsSidebar'
 import WorkspaceDropdown from './WorkspaceDropdown'
-import { BarChart3, FolderOpenIcon, LayoutDashboardIcon, SettingsIcon, UsersIcon } from 'lucide-react'
+import { BarChart3, CalendarDays, FolderOpenIcon, LayoutDashboardIcon, SettingsIcon, UsersIcon } from 'lucide-react'
 import useUserRole from '../hooks/useUserRole'
 
 const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, collapsed = false }) => {
@@ -15,6 +15,7 @@ const Sidebar = ({ isSidebarOpen, setIsSidebarOpen, collapsed = false }) => {
     const baseMenuItems = [
         { name: 'Dashboard', href: '/', icon: LayoutDashboardIcon },
         { name: 'Projects', href: '/projects', icon: FolderOpenIcon },
+        { name: 'Calendar', href: '/calendar', icon: CalendarDays }, // FOLLO CALENDAR
     ];
 
     // Admin-only menu items

@@ -8,6 +8,7 @@ import commentReducer from '../features/commentSlice'
 import slaReducer from '../features/slaSlice'
 import themeReducer from '../features/themeSlice'
 import notificationReducer from '../features/notificationSlice'
+import calendarReducer from '../features/calendarSlice' // FOLLO CALENDAR
 
 export const store = configureStore({
     reducer: {
@@ -17,6 +18,7 @@ export const store = configureStore({
         sla: slaReducer,
         theme: themeReducer,
         notifications: notificationReducer,
+        calendar: calendarReducer,
     },
     enhancers: (getDefaultEnhancers) =>
         getDefaultEnhancers().concat(Sentry.createReduxEnhancer()),
