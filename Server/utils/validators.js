@@ -328,3 +328,11 @@ export const updateEventSchema = z.object({
   outcome: z.string().max(10000).optional().nullable(),
   participantIds: z.array(z.string().max(191)).max(100).optional(),
 });
+
+// FOLLO CALENDAR — Phase 4: project site location for weather
+export const setLocationSchema = z.object({
+  locationName: z.string().max(200).optional().nullable(),
+  latitude: z.coerce.number().min(-90).max(90),
+  longitude: z.coerce.number().min(-180).max(180),
+  timezone: z.string().max(64).optional().nullable(),
+});

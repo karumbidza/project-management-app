@@ -18,6 +18,7 @@ import useUserRole from "../hooks/useUserRole";
 import { updateTaskAsync } from "../features/taskSlice";
 import {
   fetchCalendarFeed, createEventAsync, deleteEventAsync,
+  fetchProjectWeatherAsync, setProjectLocationAsync,
 } from "../features/calendarSlice";
 
 const EVENT_TYPES = {
@@ -38,20 +39,31 @@ const FILTERS = [
 const kindKey = (k) => (k === "project" ? "deadline" : k);
 const d = (s) => (s ? parseISO(s) : null);
 
+// WMO weather-code → [glyph, label] for the forecast overlay
+const WMO = {
+  0: ["☀", "Clear"], 1: ["🌤", "Mainly clear"], 2: ["⛅", "Partly cloudy"], 3: ["☁", "Overcast"],
+  45: ["🌫", "Fog"], 48: ["🌫", "Rime fog"], 51: ["🌦", "Drizzle"], 53: ["🌦", "Drizzle"], 55: ["🌦", "Drizzle"],
+  61: ["🌧", "Rain"], 63: ["🌧", "Rain"], 65: ["🌧", "Heavy rain"], 71: ["🌨", "Snow"], 80: ["🌦", "Showers"],
+  81: ["🌦", "Showers"], 82: ["⛈", "Heavy showers"], 95: ["⛈", "Thunderstorm"], 96: ["⛈", "Thunderstorm"], 99: ["⛈", "Thunderstorm"],
+};
+const wmo = (c) => WMO[c] || ["·", "—"];
+const dkey = (day) => format(day, "yyyy-MM-dd");
+
 export default function CalendarView({ scope = "global", projectId = null }) {
   const { getToken } = useAuth();
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { isAdmin } = useUserRole();
-  const { items, loading } = useSelector((s) => s.calendar);
+  const { isAdmin, canCreateTasks } = useUserRole();
+  const { items, loading, weather } = useSelector((s) => s.calendar);
 
   const [view, setView] = useState(isAdmin ? "month" : "day");
   const [cursor, setCursor] = useState(new Date());
   const [selected, setSelected] = useState(startOfDay(new Date()));
-  const [filters, setFilters] = useState(() => new Set(["task", "event", "milestone", "deadline"]));
+  const [filters, setFilters] = useState(() => new Set(["task", "event", "milestone", "deadline", "weather"]));
   const [projectFilter, setProjectFilter] = useState("all");
   const [modalItem, setModalItem] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
 
   // Fetch window for the current view (padded so day/week within a month reuse it)
   const win = useMemo(() => {
@@ -68,6 +80,17 @@ export default function CalendarView({ scope = "global", projectId = null }) {
   }, [dispatch, getToken, scope, projectId, win.from, win.to]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Weather overlay: only meaningful for a single project (project scope, or a
+  // single project selected in the global view). Served from the cached endpoint.
+  const wxProjectId = scope === "project" ? projectId : projectFilter !== "all" ? projectFilter : null;
+  useEffect(() => {
+    if (wxProjectId) dispatch(fetchProjectWeatherAsync({ getToken, projectId: wxProjectId, from: win.from.toISOString(), to: win.to.toISOString() }));
+  }, [dispatch, getToken, wxProjectId, win.from, win.to]);
+  const wxOn = filters.has("weather") && !!wxProjectId;
+  const wxByDate = weather?.byDate || {};
+  const wxFor = (day) => (wxOn ? wxByDate[dkey(day)] : null);
+  const dayRisk = (day, dayItems) => { const w = wxFor(day); return !!(w && w.risky && dayItems.some((it) => it.isWeatherSensitive)); };
 
   // Project options (for the global create-event picker) derived from the feed
   const projectOptions = useMemo(() => {
@@ -201,6 +224,7 @@ export default function CalendarView({ scope = "global", projectId = null }) {
             const dayItems = itemsForDay(day);
             const shown = dayItems.slice(0, 2), extra = dayItems.length - shown.length;
             const other = !isSameMonth(day, cursor), today = isSameDay(day, new Date()), sel = isSameDay(day, selected);
+            const wx = wxFor(day), risk = dayRisk(day, dayItems);
             return (
               <div
                 key={day.toISOString()}
@@ -211,9 +235,14 @@ export default function CalendarView({ scope = "global", projectId = null }) {
                   ${other ? "bg-zinc-50 dark:bg-zinc-950/40" : "bg-white dark:bg-zinc-900"} hover:bg-zinc-50 dark:hover:bg-zinc-800/50
                   ${sel ? "ring-2 ring-inset ring-blue-500" : ""}`}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-1">
                   <span className={`text-xs font-semibold w-6 h-6 grid place-items-center rounded-full tabular-nums
                     ${today ? "bg-blue-600 text-white" : other ? "text-zinc-400" : "text-zinc-700 dark:text-zinc-300"}`}>{format(day, "d")}</span>
+                  {wx && (
+                    <span className={`text-[10px] whitespace-nowrap ${risk ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-zinc-400"}`}>
+                      {wmo(wx.weatherCode)[0]}{wx.precipProb != null ? ` ${wx.precipProb}%` : ""}{risk ? " ⚠" : ""}
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-col gap-0.5 overflow-hidden">
                   {shown.map((it) => <Chip key={it.id} it={it} />)}
@@ -238,6 +267,7 @@ export default function CalendarView({ scope = "global", projectId = null }) {
               <button onClick={() => selectDay(day)} className={`p-2 border-b border-zinc-200 dark:border-zinc-800 text-left ${today ? "bg-blue-50 dark:bg-blue-950/30" : ""}`}>
                 <div className="text-[11px] uppercase text-zinc-500 dark:text-zinc-400">{format(day, "EEE")}</div>
                 <div className="text-lg font-bold tabular-nums">{format(day, "d")}</div>
+                {wxFor(day) && <div className={`text-[10px] ${dayRisk(day, itemsForDay(day)) ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-zinc-400"}`}>{wmo(wxFor(day).weatherCode)[0]} {wxFor(day).precipProb ?? 0}%{dayRisk(day, itemsForDay(day)) ? " ⚠" : ""}</div>}
               </button>
               <div className="p-1.5 flex flex-col gap-1" onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDropDay(e, day)}>
                 {itemsForDay(day).map((it) => <Chip key={it.id} it={it} />)}
@@ -267,9 +297,25 @@ export default function CalendarView({ scope = "global", projectId = null }) {
 
   const DayView = () => {
     const list = itemsForDay(selected);
+    const w = wxFor(selected);
     return (
       <div className="p-4">
         <h2 className="text-xl font-bold tracking-tight mb-3">{format(selected, "EEEE, d MMMM")}</h2>
+        {w && (
+          <div className="flex items-center gap-3 mb-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 px-3.5 py-2.5 text-sm">
+            <span className="text-2xl">{wmo(w.weatherCode)[0]}</span>
+            <div>
+              <div className="font-semibold">{wmo(w.weatherCode)[1]}{dayRisk(selected, list) ? <span className="text-amber-600 dark:text-amber-400"> · ⚠ weather risk</span> : ""}</div>
+              <div className="flex gap-4 text-zinc-500 dark:text-zinc-400 flex-wrap">
+                <span>Rain <b className="text-zinc-700 dark:text-zinc-200">{w.precipProb ?? 0}%</b></span>
+                <span>Rainfall <b className="text-zinc-700 dark:text-zinc-200">{w.precipMm ?? 0}mm</b></span>
+                {w.tempMinC != null && <span>Temp <b className="text-zinc-700 dark:text-zinc-200">{Math.round(w.tempMinC)}–{Math.round(w.tempMaxC)}°C</b></span>}
+                {w.windKph != null && <span>Wind <b className="text-zinc-700 dark:text-zinc-200">{Math.round(w.windKph)}km/h</b></span>}
+              </div>
+            </div>
+            <span className="ml-auto text-[11px] text-zinc-400 self-start">source: Open-Meteo</span>
+          </div>
+        )}
         {list.length ? list.map((it) => <AgendaRow key={it.id} it={it} />)
           : <div className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">Nothing scheduled. Add an event with <b>+ New event</b>.</div>}
       </div>
@@ -321,6 +367,11 @@ export default function CalendarView({ scope = "global", projectId = null }) {
               className={`h-8 px-3 rounded-md text-sm capitalize ${view === v ? "bg-white dark:bg-zinc-900 shadow-sm text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400"}`}>{v}</button>
           ))}
         </div>
+        {scope === "project" && canCreateTasks && !weather?.location && (
+          <button onClick={() => setShowLocation(true)} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">
+            <MapPin size={14} /> Set site location
+          </button>
+        )}
         <button onClick={() => setShowNew(true)} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">
           <Plus size={15} /> New event
         </button>
@@ -344,6 +395,12 @@ export default function CalendarView({ scope = "global", projectId = null }) {
             </button>
           );
         })}
+        {wxProjectId && (
+          <button onClick={() => setFilters((prev) => { const n = new Set(prev); n.has("weather") ? n.delete("weather") : n.add("weather"); return n; })}
+            className={`h-7 px-2.5 inline-flex items-center gap-1.5 rounded-full border text-xs font-medium ${filters.has("weather") ? "border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-200" : "border-zinc-200 dark:border-zinc-800 text-zinc-400 opacity-60"}`}>
+            🌦 Weather
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-3.5 items-start">
@@ -357,6 +414,11 @@ export default function CalendarView({ scope = "global", projectId = null }) {
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3.5">
           <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-2.5">Day details</h3>
           <div className="text-[15px] font-bold tracking-tight">{format(selected, "EEEE, d MMMM")}</div>
+          {wxFor(selected) && (
+            <div className={`mt-1.5 text-[12.5px] ${dayRisk(selected, itemsForDay(selected)) ? "text-amber-600 dark:text-amber-400 font-medium" : "text-zinc-500 dark:text-zinc-400"}`}>
+              {wmo(wxFor(selected).weatherCode)[0]} {wmo(wxFor(selected).weatherCode)[1]} · {wxFor(selected).precipProb ?? 0}% rain{dayRisk(selected, itemsForDay(selected)) ? " · ⚠ risk" : ""}
+            </div>
+          )}
           <div className="mt-2">
             {itemsForDay(selected).length
               ? itemsForDay(selected).map((it) => <AgendaRow key={it.id} it={it} />)
@@ -390,11 +452,16 @@ export default function CalendarView({ scope = "global", projectId = null }) {
         </div>
       </div>
 
-      {modalItem && <DetailModal it={modalItem} onClose={() => setModalItem(null)} navigate={navigate} onComplete={completeTask} onReschedule={rescheduleTask} onDeleteEvent={removeEvent} isAdmin={isAdmin} />}
+      {modalItem && <DetailModal it={modalItem} onClose={() => setModalItem(null)} navigate={navigate} onComplete={completeTask} onReschedule={rescheduleTask} onDeleteEvent={removeEvent}
+        advisory={modalItem.isWeatherSensitive && modalItem.start && wxFor(parseISO(modalItem.start))?.risky ? wxFor(parseISO(modalItem.start)) : null} />}
       {showNew && <NewEventModal onClose={() => setShowNew(false)} defaultDate={selected} scope={scope} projectId={projectId} projectOptions={projectOptions}
         onCreate={(pid, event) => dispatch(createEventAsync({ getToken, projectId: pid, event })).unwrap()
           .then(() => { toast.success("Event created"); setShowNew(false); reload(); })
           .catch((e) => toast.error(e || "Could not create event"))} />}
+      {showLocation && <LocationModal onClose={() => setShowLocation(false)} current={weather?.location}
+        onSave={(location) => dispatch(setProjectLocationAsync({ getToken, projectId: wxProjectId, location })).unwrap()
+          .then(() => { toast.success("Site location saved"); setShowLocation(false); dispatch(fetchProjectWeatherAsync({ getToken, projectId: wxProjectId, from: win.from.toISOString(), to: win.to.toISOString() })); })
+          .catch((e) => toast.error(e || "Could not save location"))} />}
     </div>
   );
 }
@@ -414,7 +481,7 @@ function StatusBadge({ item }) {
   return <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${map[tone]}`}>{s.replace(/_/g, " ").toLowerCase()}</span>;
 }
 
-function DetailModal({ it, onClose, navigate, onComplete, onReschedule, onDeleteEvent, isAdmin }) {
+function DetailModal({ it, onClose, navigate, onComplete, onReschedule, onDeleteEvent, advisory }) {
   const dt = it.start ? parseISO(it.start) : null;
   const isTaskish = it.kind === "task" || it.kind === "milestone";
   return (
@@ -439,6 +506,18 @@ function DetailModal({ it, onClose, navigate, onComplete, onReschedule, onDelete
             <span className="text-zinc-400">▸</span>
             <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 capitalize">{it.kind}</span>
           </div>
+          {advisory && (
+            <div className="rounded-xl border border-amber-300 dark:border-amber-800 overflow-hidden text-[12.5px]">
+              <div className="flex gap-2.5 items-start p-3 bg-zinc-50 dark:bg-zinc-800/50">
+                <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 shrink-0">Forecast</span>
+                <div><b>{wmo(advisory.weatherCode)[1]}</b> — rain {advisory.precipProb ?? 0}%, {advisory.precipMm ?? 0}mm{advisory.windKph != null ? `, wind ${Math.round(advisory.windKph)}km/h` : ""}. <span className="text-zinc-500">Data from Open-Meteo.</span></div>
+              </div>
+              <div className="flex gap-2.5 items-start p-3 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-300 dark:border-amber-800">
+                <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500 text-white shrink-0">Suggestion</span>
+                <div>This activity is weather-sensitive and the day meets the rain-risk threshold. <b>Consider reviewing it</b> — advisory, not a prediction.</div>
+              </div>
+            </div>
+          )}
           <dl className="grid grid-cols-[90px_1fr] gap-y-1 gap-x-3">
             {dt && <><dt className="text-zinc-500">Date</dt><dd className="font-medium">{format(dt, "EEE, d MMM yyyy")}{it.start && !it.allDay ? ` · ${format(dt, "HH:mm")}` : ""}</dd></>}
             {it.location && <><dt className="text-zinc-500">Location</dt><dd className="font-medium flex items-center gap-1"><MapPin size={13} /> {it.location}</dd></>}
@@ -510,6 +589,45 @@ function NewEventModal({ onClose, defaultDate, scope, projectId, projectOptions,
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={weather} onChange={(e) => setWeather(e.target.checked)} className="w-4 h-4" /> Weather-sensitive activity</label>
           <div className="flex gap-2 pt-1">
             <button onClick={submit} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">Create event</button>
+            <button onClick={onClose} className="h-9 px-4 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LocationModal({ onClose, current, onSave }) {
+  const [name, setName] = useState(current?.name || "");
+  const [lat, setLat] = useState(current?.latitude ?? "");
+  const [lng, setLng] = useState(current?.longitude ?? "");
+  const submit = () => {
+    const latitude = Number(lat), longitude = Number(lng);
+    if (Number.isNaN(latitude) || Number.isNaN(longitude) || lat === "" || lng === "") { toast.error("Enter valid coordinates"); return; }
+    onSave({ locationName: name.trim() || null, latitude, longitude });
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/50" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 relative">
+          <button onClick={onClose} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-700"><X size={20} /></button>
+          <h2 className="text-lg font-bold tracking-tight">Site location</h2>
+          <p className="text-xs text-zinc-500 mt-1">Used to fetch the site's weather forecast (Open-Meteo).</p>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="block"><span className="text-xs font-semibold text-zinc-500">Location name (optional)</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gokwe site"
+              className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block"><span className="text-xs font-semibold text-zinc-500">Latitude</span>
+              <input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" placeholder="-17.83"
+                className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
+            <label className="block"><span className="text-xs font-semibold text-zinc-500">Longitude</span>
+              <input value={lng} onChange={(e) => setLng(e.target.value)} inputMode="decimal" placeholder="31.05"
+                className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={submit} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">Save location</button>
             <button onClick={onClose} className="h-9 px-4 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">Cancel</button>
           </div>
         </div>

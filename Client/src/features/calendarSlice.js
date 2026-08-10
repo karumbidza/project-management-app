@@ -71,13 +71,45 @@ export const deleteEventAsync = createAsyncThunk(
   },
 );
 
+// FOLLO CALENDAR — Phase 4 weather
+export const fetchProjectWeatherAsync = createAsyncThunk(
+  "calendar/fetchWeather",
+  async ({ getToken, projectId, from, to }, { rejectWithValue }) => {
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const result = await apiCall(`${API_V1}/calendar/project/${projectId}/weather?${params.toString()}`, {}, getToken);
+      return result.data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const setProjectLocationAsync = createAsyncThunk(
+  "calendar/setLocation",
+  async ({ getToken, projectId, location }, { rejectWithValue }) => {
+    try {
+      const result = await apiCall(
+        `${API_V1}/calendar/project/${projectId}/location`,
+        { method: "PATCH", body: JSON.stringify(location) },
+        getToken,
+      );
+      return result.data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SLICE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const calendarSlice = createSlice({
   name: "calendar",
-  initialState: { items: [], range: null, loading: false, error: null },
+  initialState: { items: [], range: null, loading: false, error: null, weather: { location: null, byDate: {} } },
   reducers: {},
   extraReducers: (builder) => {
     builder
@@ -93,6 +125,16 @@ const calendarSlice = createSlice({
       .addCase(fetchCalendarFeed.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload || "Failed to load calendar";
+      })
+      .addCase(fetchProjectWeatherAsync.fulfilled, (state, action) => {
+        const days = action.payload?.days || [];
+        state.weather = {
+          location: action.payload?.location || null,
+          byDate: Object.fromEntries(days.map((d) => [d.date, d])),
+        };
+      })
+      .addCase(setProjectLocationAsync.fulfilled, (state, action) => {
+        state.weather.location = action.payload || state.weather.location;
       });
   },
 });

@@ -7,6 +7,7 @@
 import { asyncHandler } from '../utils/errors.js';
 import { sendSuccess, sendCreated } from '../utils/response.js';
 import * as calendarService from '../services/calendarService.js';
+import * as weatherService from '../services/weatherService.js'; // FOLLO CALENDAR — Phase 4
 
 // ── Feed ─────────────────────────────────────────────────────────────────────
 
@@ -63,4 +64,22 @@ export const deleteEvent = asyncHandler(async (req, res) => {
   const io = req.app.get('io');
   if (io) io.to(`project:${result.projectId}`).emit('event_deleted', { eventId, projectId: result.projectId });
   sendSuccess(res, result);
+});
+
+// ── Weather (Phase 4) ──────────────────────────────────────────────────────────
+
+// GET /api/v1/calendar/project/:projectId/weather?from&to
+export const getProjectWeather = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+  const data = await weatherService.getProjectWeather(projectId, userId, req.query);
+  sendSuccess(res, data);
+});
+
+// PATCH /api/v1/calendar/project/:projectId/location
+export const setProjectLocation = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+  const data = await weatherService.setProjectLocation(projectId, userId, req.body);
+  sendSuccess(res, data, 'Location updated');
 });

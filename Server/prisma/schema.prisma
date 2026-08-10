@@ -734,3 +734,27 @@ model CalendarEventException {
 
   @@unique([eventId, originalDate])
 }
+
+// FOLLO CALENDAR — weather forecast cache (Phase 4).
+// Keyed by ROUNDED lat/lng (≈1km) + date so nearby projects share one row and
+// the API is called at most once per site per day. Served only from this cache;
+// the request path never calls Open-Meteo directly.
+model WeatherSnapshot {
+  id           String   @id @default(uuid())
+  latBucket    Decimal  @db.Decimal(6, 2)
+  lngBucket    Decimal  @db.Decimal(6, 2)
+  forecastDate DateTime @db.Date
+  fetchedAt    DateTime @default(now())
+  source       String   @default("open-meteo")
+  tempMinC     Float?
+  tempMaxC     Float?
+  precipMm     Float? // precipitation_sum
+  precipProb   Int? // precipitation_probability_max (%)
+  windKph      Float? // wind_speed_10m_max
+  humidity     Int? // relative_humidity_2m mean
+  weatherCode  Int? // WMO code
+  raw          Json?
+
+  @@unique([latBucket, lngBucket, forecastDate])
+  @@index([forecastDate])
+}

@@ -4,6 +4,7 @@
 // FOLLO ACCESS-SEC
 import prisma from "../configs/prisma.js";
 import emailService from "../utils/emailService.js";
+import { listDistinctLocations, fetchAndCache } from "../services/weatherService.js"; // FOLLO CALENDAR
 import { inngest } from "./client.js";
 import { slaFunctions } from "./slaJobs.js";
 import { io } from "../server.js";
@@ -551,6 +552,32 @@ const cleanupExpiredInvitations = inngest.createFunction(
   }
 );
 
+// FOLLO CALENDAR — Phase 4: refresh the weather cache for every site location
+// once a day. The request path serves only from this cache.
+const refreshWeatherCache = inngest.createFunction(
+  {
+    id:        'follo/refresh-weather-cache',
+    name:      'Refresh Weather Cache',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '10m' },
+    onFailure: makeFailureHandler('follo/refresh-weather-cache'),
+  },
+  { cron: '0 5 * * *' },
+  async ({ step }) => {
+    const locations = await step.run('list-locations', () => listDistinctLocations());
+    let refreshed = 0;
+    for (const loc of locations) {
+      try {
+        await fetchAndCache(loc.lat, loc.lng, loc.timezone);
+        refreshed++;
+      } catch (err) {
+        console.error('[weather] refresh failed for', loc, err.message);
+      }
+    }
+    return { locations: locations.length, refreshed };
+  }
+);
+
 export const functions = [
   syncUserCreation,
   syncUserDeletion,
@@ -563,6 +590,8 @@ export const functions = [
   // Scheduled reminders
   sendTaskDueReminders,
   sendOverdueTaskNotifications,
+  // Weather (FOLLO CALENDAR)
+  refreshWeatherCache,
   // Maintenance
   cleanupExpiredInvitations,
   // SLA jobs (FOLLO SLA)

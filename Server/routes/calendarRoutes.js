@@ -12,8 +12,10 @@ import {
   getEvent,
   updateEvent,
   deleteEvent,
+  getProjectWeather,
+  setProjectLocation,
 } from '../controllers/calendarController.js';
-import { validate, createEventSchema, updateEventSchema } from '../utils/validators.js';
+import { validate, createEventSchema, updateEventSchema, setLocationSchema } from '../utils/validators.js';
 import { writeLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
@@ -27,6 +29,16 @@ router.get('/', getGlobalCalendar);
 
 // GET /api/v1/calendar/project/:projectId?from&to&views — one project
 router.get('/project/:projectId', getProjectCalendar);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// WEATHER (Phase 4) — served from cache; advisory computed client-side
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// GET /api/v1/calendar/project/:projectId/weather?from&to
+router.get('/project/:projectId/weather', getProjectWeather);
+
+// PATCH /api/v1/calendar/project/:projectId/location  (manager/owner)
+router.patch('/project/:projectId/location', writeLimiter, validate(setLocationSchema), setProjectLocation);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // EVENTS
