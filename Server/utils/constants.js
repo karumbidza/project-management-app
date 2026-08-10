@@ -93,6 +93,56 @@ export const NOTIFICATION_TYPE = Object.freeze({
   COMMENT_ADDED: 'COMMENT_ADDED',
   PROJECT_INVITE: 'PROJECT_INVITE',
   DELAY_ALERT: 'DELAY_ALERT',
+  // FOLLO CALENDAR
+  EVENT_REMINDER: 'EVENT_REMINDER',
+  DEADLINE_APPROACHING: 'DEADLINE_APPROACHING',
+  MILESTONE_APPROACHING: 'MILESTONE_APPROACHING',
+  SCHEDULE_CONFLICT: 'SCHEDULE_CONFLICT',
+  WEATHER_ALERT: 'WEATHER_ALERT',
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FOLLO CALENDAR — event enums + normalised feed item kinds
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export const CALENDAR_EVENT_TYPE = Object.freeze({
+  PROJECT_MEETING: 'PROJECT_MEETING',
+  SITE_MEETING: 'SITE_MEETING',
+  CONTRACTOR_MEETING: 'CONTRACTOR_MEETING',
+  CLIENT_MEETING: 'CLIENT_MEETING',
+  INSPECTION: 'INSPECTION',
+  SITE_VISIT: 'SITE_VISIT',
+  HANDOVER: 'HANDOVER',
+  PROGRESS_REVIEW: 'PROGRESS_REVIEW',
+  INTERNAL_MEETING: 'INTERNAL_MEETING',
+  SITE_ACTIVITY: 'SITE_ACTIVITY',
+  MAINTENANCE: 'MAINTENANCE',
+  APPOINTMENT: 'APPOINTMENT',
+  OTHER: 'OTHER',
+});
+
+export const EVENT_STATUS = Object.freeze({
+  SCHEDULED: 'SCHEDULED',
+  CONFIRMED: 'CONFIRMED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+});
+
+export const PARTICIPANT_RESPONSE = Object.freeze({
+  INVITED: 'INVITED',
+  ACCEPTED: 'ACCEPTED',
+  DECLINED: 'DECLINED',
+  TENTATIVE: 'TENTATIVE',
+});
+
+// Kinds in the normalised calendar feed (tasks/milestones/deadlines are derived
+// from existing rows; only `event` is a stored CalendarEvent).
+export const CALENDAR_ITEM_KIND = Object.freeze({
+  TASK: 'task',
+  MILESTONE: 'milestone',
+  DEADLINE: 'deadline',
+  PROJECT: 'project',
+  EVENT: 'event',
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

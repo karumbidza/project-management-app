@@ -254,3 +254,29 @@ export const memberSelect = {
   isActive: true,
   user: { select: userSelect },
 };
+
+// FOLLO CALENDAR — event with participants (light) for the feed + detail
+export const calendarEventSelect = {
+  id: true,
+  projectId: true,
+  relatedTaskId: true,
+  type: true,
+  status: true,
+  title: true,
+  description: true,
+  location: true,
+  startAt: true,
+  endAt: true,
+  allDay: true,
+  timezone: true,
+  isWeatherSensitive: true,
+  rrule: true,
+  recurrenceEndAt: true,
+  responsibleId: true,
+  outcome: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+  participants: { select: { userId: true, response: true, user: { select: userSelectMinimal } } },
+  exceptions: { select: { id: true, originalDate: true, cancelled: true, startAt: true, endAt: true, title: true } },
+};

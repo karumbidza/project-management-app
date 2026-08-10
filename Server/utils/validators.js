@@ -4,14 +4,16 @@
  */
 
 import { z } from 'zod';
-import { 
-  WORKSPACE_ROLES, 
-  PROJECT_ROLES, 
-  TASK_STATUS, 
-  TASK_TYPE, 
-  PRIORITY, 
+import {
+  WORKSPACE_ROLES,
+  PROJECT_ROLES,
+  TASK_STATUS,
+  TASK_TYPE,
+  PRIORITY,
   PROJECT_STATUS,
-  LIMITS 
+  LIMITS,
+  CALENDAR_EVENT_TYPE,
+  EVENT_STATUS,
 } from './constants.js';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -272,3 +274,57 @@ export function validateAll(schemas) {
     next();
   };
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FOLLO CALENDAR — event + feed-query schemas
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const isoDateTime = z.coerce.date();
+
+export const calendarQuerySchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  // csv of: tasks,events,milestones,deadlines,projects (default = all)
+  views: z.string().max(120).optional(),
+});
+
+export const createEventSchema = z
+  .object({
+    title: z.string().min(1, 'Title is required').max(200).trim(),
+    type: z.nativeEnum(CALENDAR_EVENT_TYPE).default(CALENDAR_EVENT_TYPE.PROJECT_MEETING),
+    description: z.string().max(5000).optional().nullable(),
+    location: z.string().max(300).optional().nullable(),
+    startAt: isoDateTime,
+    endAt: isoDateTime.optional().nullable(),
+    allDay: z.boolean().optional().default(false),
+    timezone: z.string().max(64).optional().nullable(),
+    isWeatherSensitive: z.boolean().optional().default(false),
+    rrule: z.string().max(400).optional().nullable(),
+    recurrenceEndAt: isoDateTime.optional().nullable(),
+    relatedTaskId: z.string().uuid().optional().nullable(),
+    responsibleId: z.string().max(191).optional().nullable(),
+    status: z.nativeEnum(EVENT_STATUS).optional().default(EVENT_STATUS.SCHEDULED),
+    participantIds: z.array(z.string().max(191)).max(100).optional().default([]),
+  })
+  .refine((d) => !d.endAt || d.endAt >= d.startAt, {
+    message: 'endAt must be on or after startAt',
+    path: ['endAt'],
+  });
+
+export const updateEventSchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  type: z.nativeEnum(CALENDAR_EVENT_TYPE).optional(),
+  description: z.string().max(5000).optional().nullable(),
+  location: z.string().max(300).optional().nullable(),
+  startAt: isoDateTime.optional(),
+  endAt: isoDateTime.optional().nullable(),
+  allDay: z.boolean().optional(),
+  timezone: z.string().max(64).optional().nullable(),
+  isWeatherSensitive: z.boolean().optional(),
+  rrule: z.string().max(400).optional().nullable(),
+  recurrenceEndAt: isoDateTime.optional().nullable(),
+  relatedTaskId: z.string().uuid().optional().nullable(),
+  responsibleId: z.string().max(191).optional().nullable(),
+  status: z.nativeEnum(EVENT_STATUS).optional(),
+  outcome: z.string().max(10000).optional().nullable(),
+  participantIds: z.array(z.string().max(191)).max(100).optional(),
+});

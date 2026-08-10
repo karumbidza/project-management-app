@@ -34,6 +34,7 @@ import mediaRouter from './routes/mediaRoutes.js';
 import taskSlaRouter from './routes/taskSlaRoutes.js';
 import templateRouter from './routes/templateRoutes.js';
 import notificationRouter from './routes/notificationRoutes.js';
+import calendarRouter from './routes/calendarRoutes.js'; // FOLLO CALENDAR
 
 // Middleware & Utils
 import { protect } from './middlewares/authMiddleware.js';
@@ -256,6 +257,7 @@ app.use('/api/v1/tasks',         protect, taskRouter);
 app.use('/api/v1/tasks',         protect, taskSlaRouter);  // FOLLO SLA routes
 app.use('/api/v1/templates',     protect, templateRouter); // FOLLO SLA Phase 7
 app.use('/api/v1/notifications', protect, notificationRouter); // FOLLO NOTIFY
+app.use('/api/v1/calendar',      protect, calendarRouter);     // FOLLO CALENDAR
 app.use('/api/v1/media',         protect, mediaRouter);
 
 // FOLLO AUDIT — Legacy unversioned routes kept for backwards compat; prefer /api/v1/
