@@ -152,6 +152,15 @@ export async function setProjectLocation(projectId, userId, data) {
   return project;
 }
 
+/** One cached snapshot for a location + date ('YYYY-MM-DD'), or null. */
+export async function getSnapshot(lat, lng, dateStr) {
+  if (lat == null || lng == null) return null;
+  const forecastDate = new Date(`${dateStr}T00:00:00Z`);
+  return prisma.weatherSnapshot.findUnique({
+    where: { latBucket_lngBucket_forecastDate: { latBucket: bucket(lat), lngBucket: bucket(lng), forecastDate } },
+  });
+}
+
 /** Distinct rounded locations across all projects that have coordinates. */
 export async function listDistinctLocations() {
   const projects = await prisma.project.findMany({

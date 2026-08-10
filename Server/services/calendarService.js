@@ -18,6 +18,7 @@ import { requireProjectAccess } from '../utils/permissions.js';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { ERROR_CODES } from '../utils/constants.js';
 import { calendarEventSelect } from '../lib/selectShapes.js';
+import { inngest } from '../inngest/client.js'; // FOLLO CALENDAR — Phase 5 reminders
 import {
   DAY_MS,
   expandRecurrence,
@@ -166,6 +167,33 @@ function canEditEvent(event, userId, role) {
   return role === 'OWNER' || role === 'MANAGER' || event.createdById === userId || event.responsibleId === userId;
 }
 
+/**
+ * Schedule a one-shot reminder via a delayed Inngest event (mirrors the SLA
+ * pattern). Default is 24h before; if the event is <24h out, remind 1h before;
+ * if <1h out (or in the past, or cancelled, or recurring), skip. The handler
+ * re-checks state, so re-scheduling on update is naturally idempotent: the stale
+ * delayed event fires later, sees startAt no longer matches, and no-ops.
+ * Recurring events (rrule) are skipped in v1. Best-effort — never blocks writes.
+ */
+async function scheduleEventReminder(event) {
+  try {
+    if (!event || event.rrule || event.status === 'CANCELLED') return;
+    const startMs = new Date(event.startAt).getTime();
+    const now = Date.now();
+    if (!(startMs > now)) return;
+    let ts = startMs - 24 * 60 * 60 * 1000;
+    if (ts <= now) ts = startMs - 60 * 60 * 1000;
+    if (ts <= now) return;
+    await inngest.send({
+      name: 'follo/calendar.event.reminder',
+      data: { eventId: event.id, scheduledStart: new Date(event.startAt).toISOString() },
+      ts,
+    });
+  } catch (err) {
+    console.error('[calendar] schedule reminder failed:', err.message);
+  }
+}
+
 export async function createEvent(projectId, userId, body) {
   const { role } = await requireProjectAccess(userId, projectId);
   if (role === 'VIEWER') {
@@ -184,6 +212,7 @@ export async function createEvent(projectId, userId, body) {
     },
     select: calendarEventSelect,
   });
+  await scheduleEventReminder(event);
   return event;
 }
 
@@ -205,7 +234,7 @@ export async function updateEvent(eventId, userId, body) {
     throw new AuthorizationError('You cannot edit this event', ERROR_CODES.INSUFFICIENT_PERMISSIONS);
   }
   const { participantIds, ...data } = body;
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     if (participantIds) {
       const unique = [...new Set(participantIds)];
       await tx.eventParticipant.deleteMany({ where: { eventId } });
@@ -215,6 +244,8 @@ export async function updateEvent(eventId, userId, body) {
     }
     return tx.calendarEvent.update({ where: { id: eventId }, data, select: calendarEventSelect });
   });
+  if ('startAt' in data) await scheduleEventReminder(updated);
+  return updated;
 }
 
 export async function deleteEvent(eventId, userId) {

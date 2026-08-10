@@ -4,7 +4,8 @@
 // FOLLO ACCESS-SEC
 import prisma from "../configs/prisma.js";
 import emailService from "../utils/emailService.js";
-import { listDistinctLocations, fetchAndCache } from "../services/weatherService.js"; // FOLLO CALENDAR
+import { createBulkNotifications } from "../utils/notificationService.js"; // FOLLO CALENDAR
+import { listDistinctLocations, fetchAndCache, getSnapshot, computeRisk } from "../services/weatherService.js"; // FOLLO CALENDAR
 import { inngest } from "./client.js";
 import { slaFunctions } from "./slaJobs.js";
 import { io } from "../server.js";
@@ -578,6 +579,106 @@ const refreshWeatherCache = inngest.createFunction(
   }
 );
 
+// FOLLO CALENDAR — Phase 5: fire a one-shot reminder for an upcoming event.
+// Scheduled at create/update time via inngest.send({ ts }); this handler
+// re-checks state so stale (rescheduled/cancelled) reminders no-op.
+const onCalendarEventReminder = inngest.createFunction(
+  {
+    id:        'follo/calendar-event-reminder',
+    name:      'Calendar Event Reminder',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '2m' },
+    onFailure: makeFailureHandler('follo/calendar-event-reminder'),
+  },
+  { event: 'follo/calendar.event.reminder' },
+  async ({ event: ingEvent }) => {
+    const { eventId, scheduledStart } = ingEvent.data || {};
+    const ev = await prisma.calendarEvent.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true, projectId: true, title: true, startAt: true, status: true,
+        createdById: true, responsibleId: true, participants: { select: { userId: true } },
+      },
+    });
+    if (!ev || ev.status === 'CANCELLED') return { skipped: 'gone-or-cancelled' };
+    if (new Date(ev.startAt).toISOString() !== scheduledStart) return { skipped: 'rescheduled' };
+
+    const recipients = [...new Set([ev.createdById, ev.responsibleId, ...ev.participants.map((p) => p.userId)].filter(Boolean))];
+    await createBulkNotifications(recipients, {
+      type:     'EVENT_REMINDER',
+      title:    `Upcoming: ${ev.title}`,
+      message:  `Starts ${new Date(ev.startAt).toUTCString()}`,
+      metadata: { eventId: ev.id, projectId: ev.projectId },
+      url:      `/projectsDetail?id=${ev.projectId}&tab=calendar`,
+    });
+    return { notified: recipients.length };
+  }
+);
+
+// FOLLO CALENDAR — Phase 5: daily sweep for approaching milestones and
+// weather-sensitive activities. Scoped to the "tomorrow" window so each item is
+// surfaced roughly once (mirrors sendTaskDueReminders' bounded window).
+const computeCalendarInsights = inngest.createFunction(
+  {
+    id:        'follo/calendar-insights',
+    name:      'Calendar Insights Sweep',
+    retries:   2,
+    timeouts:  { start: '30s', finish: '10m' },
+    onFailure: makeFailureHandler('follo/calendar-insights'),
+  },
+  { cron: '0 6 * * *' },
+  async () => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(start); tomorrow.setDate(tomorrow.getDate() + 1);
+    const dayAfter = new Date(tomorrow); dayAfter.setDate(dayAfter.getDate() + 1);
+
+    // Milestones due tomorrow → notify assignee + project managers/owner.
+    const milestones = await prisma.task.findMany({
+      where: { type: 'MILESTONE', status: { not: 'DONE' }, dueDate: { gte: tomorrow, lt: dayAfter } },
+      select: {
+        id: true, title: true, projectId: true, assigneeId: true,
+        project: { select: { ownerId: true, members: { where: { role: { in: ['OWNER', 'MANAGER'] }, isActive: true }, select: { userId: true } } } },
+      },
+    });
+    let milestoneAlerts = 0;
+    for (const m of milestones) {
+      const recipients = [...new Set([m.assigneeId, m.project.ownerId, ...m.project.members.map((x) => x.userId)].filter(Boolean))];
+      if (!recipients.length) continue;
+      await createBulkNotifications(recipients, {
+        type: 'MILESTONE_APPROACHING', title: `Milestone tomorrow: ${m.title}`, message: 'Due tomorrow.',
+        metadata: { taskId: m.id, projectId: m.projectId }, url: `/task?id=${m.id}`,
+      });
+      milestoneAlerts++;
+    }
+
+    // Weather-sensitive events tomorrow on a forecast-risk day → advisory alert.
+    const events = await prisma.calendarEvent.findMany({
+      where: { isWeatherSensitive: true, status: { not: 'CANCELLED' }, startAt: { gte: tomorrow, lt: dayAfter } },
+      select: {
+        id: true, title: true, projectId: true, startAt: true, createdById: true, responsibleId: true,
+        participants: { select: { userId: true } }, project: { select: { latitude: true, longitude: true } },
+      },
+    });
+    let weatherAlerts = 0;
+    for (const ev of events) {
+      const snap = await getSnapshot(ev.project.latitude, ev.project.longitude, new Date(ev.startAt).toISOString().slice(0, 10));
+      if (!snap || !computeRisk(snap)) continue;
+      const recipients = [...new Set([ev.createdById, ev.responsibleId, ...ev.participants.map((p) => p.userId)].filter(Boolean))];
+      if (!recipients.length) continue;
+      await createBulkNotifications(recipients, {
+        type: 'WEATHER_ALERT',
+        title: `Weather risk: ${ev.title}`,
+        message: `Forecast for tomorrow shows ${snap.precipProb ?? 0}% rain, ${snap.precipMm ?? 0}mm. Consider reviewing this activity (advisory).`,
+        metadata: { eventId: ev.id, projectId: ev.projectId },
+        url: `/projectsDetail?id=${ev.projectId}&tab=calendar`,
+      });
+      weatherAlerts++;
+    }
+
+    return { milestoneAlerts, weatherAlerts };
+  }
+);
+
 export const functions = [
   syncUserCreation,
   syncUserDeletion,
@@ -592,6 +693,9 @@ export const functions = [
   sendOverdueTaskNotifications,
   // Weather (FOLLO CALENDAR)
   refreshWeatherCache,
+  // Calendar reminders & intelligence (FOLLO CALENDAR — Phase 5)
+  onCalendarEventReminder,
+  computeCalendarInsights,
   // Maintenance
   cleanupExpiredInvitations,
   // SLA jobs (FOLLO SLA)
