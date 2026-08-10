@@ -14,8 +14,16 @@ import {
   deleteEvent,
   getProjectWeather,
   setProjectLocation,
+  createNote,
+  getProjectNotes,
+  updateNote,
+  deleteNote,
+  convertNoteToTask,
 } from '../controllers/calendarController.js';
-import { validate, createEventSchema, updateEventSchema, setLocationSchema } from '../utils/validators.js';
+import {
+  validate, createEventSchema, updateEventSchema, setLocationSchema,
+  createNoteSchema, updateNoteSchema, convertNoteToTaskSchema,
+} from '../utils/validators.js';
 import { writeLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
@@ -39,6 +47,16 @@ router.get('/project/:projectId/weather', getProjectWeather);
 
 // PATCH /api/v1/calendar/project/:projectId/location  (manager/owner)
 router.patch('/project/:projectId/location', writeLimiter, validate(setLocationSchema), setProjectLocation);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// NOTES / JOURNAL (Phase 3)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+router.get('/project/:projectId/notes', getProjectNotes);
+router.post('/notes', writeLimiter, validate(createNoteSchema), createNote);
+router.patch('/notes/:noteId', writeLimiter, validate(updateNoteSchema), updateNote);
+router.delete('/notes/:noteId', writeLimiter, deleteNote);
+router.post('/notes/:noteId/convert-to-task', writeLimiter, validate(convertNoteToTaskSchema), convertNoteToTask);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // EVENTS

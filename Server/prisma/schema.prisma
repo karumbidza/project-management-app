@@ -138,6 +138,7 @@ model User {
   projectComments       ProjectComment[] // FOLLO PROJECT-OVERVIEW
   calendarEventsCreated CalendarEvent[]    @relation("EventCreator") // FOLLO CALENDAR
   eventParticipations   EventParticipant[] // FOLLO CALENDAR
+  notesAuthored         Note[]             @relation("NoteAuthor") // FOLLO CALENDAR
 
   // Indexes for query performance
   @@index([email])
@@ -220,6 +221,7 @@ model Project {
   projectComments ProjectComment[] // FOLLO PROJECT-OVERVIEW
   pinnedLinks     ProjectLink[] // FOLLO PROJECT-OVERVIEW
   calendarEvents  CalendarEvent[] // FOLLO CALENDAR
+  notes           Note[] // FOLLO CALENDAR
 
   // Indexes
   @@index([workspaceId])
@@ -346,6 +348,7 @@ model Task {
   activities     TaskActivity[]
   slaEvents      SlaEvent[]
   calendarEvents CalendarEvent[] @relation("EventTask") // FOLLO CALENDAR — events linked to this task
+  notes          Note[] // FOLLO CALENDAR
 
   // Task Dependencies (self-referential)
   predecessors TaskDependency[] @relation("TaskSuccessor")
@@ -701,6 +704,8 @@ model CalendarEvent {
   createdBy    User                     @relation("EventCreator", fields: [createdById], references: [id], onDelete: Cascade)
   participants EventParticipant[]
   exceptions   CalendarEventException[]
+  notes        Note[] // FOLLO CALENDAR
+  attachments  Attachment[] // FOLLO CALENDAR
 
   @@index([projectId, startAt])
   @@index([startAt])
@@ -757,4 +762,56 @@ model WeatherSnapshot {
 
   @@unique([latBucket, lngBucket, forecastDate])
   @@index([forecastDate])
+}
+
+// FOLLO CALENDAR — Phase 3: project journal / notes + attachments.
+// A note is dated and authored, and links to at least one of project/task/event.
+enum NoteType {
+  GENERAL
+  SITE_VISIT
+  PROGRESS
+  ISSUE
+  DECISION
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  type      NoteType @default(GENERAL)
+  body      String
+  noteDate  DateTime // the date the note is about
+  authorId  String
+  projectId String?
+  taskId    String?
+  eventId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author      User           @relation("NoteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  project     Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task        Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  event       CalendarEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@index([projectId, noteDate])
+  @@index([authorId])
+}
+
+// Shared attachment, reusing the Comment media conventions (R2/Mux CommentType).
+model Attachment {
+  id          String      @id @default(uuid())
+  noteId      String?
+  eventId     String?
+  url         String
+  fileKey     String?
+  fileName    String?
+  type        CommentType @default(FILE)
+  sizeBytes   Int?
+  createdById String
+  createdAt   DateTime    @default(now())
+
+  note  Note?          @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  event CalendarEvent? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([noteId])
+  @@index([eventId])
 }

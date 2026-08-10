@@ -135,6 +135,14 @@ export const PARTICIPANT_RESPONSE = Object.freeze({
   TENTATIVE: 'TENTATIVE',
 });
 
+export const NOTE_TYPE = Object.freeze({
+  GENERAL: 'GENERAL',
+  SITE_VISIT: 'SITE_VISIT',
+  PROGRESS: 'PROGRESS',
+  ISSUE: 'ISSUE',
+  DECISION: 'DECISION',
+});
+
 // Kinds in the normalised calendar feed (tasks/milestones/deadlines are derived
 // from existing rows; only `event` is a stored CalendarEvent).
 export const CALENDAR_ITEM_KIND = Object.freeze({

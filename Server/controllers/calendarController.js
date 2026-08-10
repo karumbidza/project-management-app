@@ -8,6 +8,7 @@ import { asyncHandler } from '../utils/errors.js';
 import { sendSuccess, sendCreated } from '../utils/response.js';
 import * as calendarService from '../services/calendarService.js';
 import * as weatherService from '../services/weatherService.js'; // FOLLO CALENDAR — Phase 4
+import * as noteService from '../services/noteService.js'; // FOLLO CALENDAR — Phase 3
 
 // ── Feed ─────────────────────────────────────────────────────────────────────
 
@@ -82,4 +83,45 @@ export const setProjectLocation = asyncHandler(async (req, res) => {
   const { userId } = await req.auth();
   const data = await weatherService.setProjectLocation(projectId, userId, req.body);
   sendSuccess(res, data, 'Location updated');
+});
+
+// ── Notes / journal (Phase 3) ────────────────────────────────────────────────
+
+// POST /api/v1/calendar/notes
+export const createNote = asyncHandler(async (req, res) => {
+  const { userId } = await req.auth();
+  const note = await noteService.createNote(userId, req.body);
+  sendCreated(res, note, 'Note added');
+});
+
+// GET /api/v1/calendar/project/:projectId/notes?from&to
+export const getProjectNotes = asyncHandler(async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = await req.auth();
+  const notes = await noteService.getProjectNotes(projectId, userId, req.query);
+  sendSuccess(res, notes);
+});
+
+// PATCH /api/v1/calendar/notes/:noteId
+export const updateNote = asyncHandler(async (req, res) => {
+  const { noteId } = req.params;
+  const { userId } = await req.auth();
+  const note = await noteService.updateNote(noteId, userId, req.body);
+  sendSuccess(res, note);
+});
+
+// DELETE /api/v1/calendar/notes/:noteId
+export const deleteNote = asyncHandler(async (req, res) => {
+  const { noteId } = req.params;
+  const { userId } = await req.auth();
+  const result = await noteService.deleteNote(noteId, userId);
+  sendSuccess(res, result);
+});
+
+// POST /api/v1/calendar/notes/:noteId/convert-to-task
+export const convertNoteToTask = asyncHandler(async (req, res) => {
+  const { noteId } = req.params;
+  const { userId } = await req.auth();
+  const task = await noteService.convertNoteToTask(noteId, userId, req.body);
+  sendCreated(res, task, 'Task created from note');
 });

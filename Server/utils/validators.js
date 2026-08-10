@@ -14,6 +14,7 @@ import {
   LIMITS,
   CALENDAR_EVENT_TYPE,
   EVENT_STATUS,
+  NOTE_TYPE,
 } from './constants.js';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -335,4 +336,37 @@ export const setLocationSchema = z.object({
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
   timezone: z.string().max(64).optional().nullable(),
+});
+
+// FOLLO CALENDAR — Phase 3: notes / journal
+const attachmentSchema = z.object({
+  url: z.string().url(),
+  fileName: z.string().max(300).optional().nullable(),
+  fileKey: z.string().max(500).optional().nullable(),
+  type: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'FILE']).default('FILE'),
+  sizeBytes: z.number().int().positive().optional().nullable(),
+});
+
+export const createNoteSchema = z.object({
+  type: z.nativeEnum(NOTE_TYPE).default(NOTE_TYPE.GENERAL),
+  body: z.string().min(1, 'Note text is required').max(20000).trim(),
+  noteDate: z.coerce.date().optional(),
+  projectId: z.string().uuid().optional().nullable(),
+  taskId: z.string().uuid().optional().nullable(),
+  eventId: z.string().uuid().optional().nullable(),
+  attachments: z.array(attachmentSchema).max(20).optional(),
+}).refine((d) => d.projectId || d.taskId || d.eventId, {
+  message: 'A note must be linked to a project, task, or event',
+  path: ['projectId'],
+});
+
+export const updateNoteSchema = z.object({
+  type: z.nativeEnum(NOTE_TYPE).optional(),
+  body: z.string().min(1).max(20000).trim().optional(),
+  noteDate: z.coerce.date().optional(),
+});
+
+export const convertNoteToTaskSchema = z.object({
+  title: z.string().min(1).max(200).trim().optional(),
+  due_date: z.string().optional().nullable(),
 });

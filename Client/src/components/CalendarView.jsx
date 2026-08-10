@@ -19,6 +19,7 @@ import { updateTaskAsync } from "../features/taskSlice";
 import {
   fetchCalendarFeed, createEventAsync, deleteEventAsync,
   fetchProjectWeatherAsync, setProjectLocationAsync,
+  fetchProjectNotesAsync, createNoteAsync, deleteNoteAsync, convertNoteToTaskAsync,
 } from "../features/calendarSlice";
 
 const EVENT_TYPES = {
@@ -54,7 +55,7 @@ export default function CalendarView({ scope = "global", projectId = null }) {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { isAdmin, canCreateTasks } = useUserRole();
-  const { items, loading, weather } = useSelector((s) => s.calendar);
+  const { items, loading, weather, notes } = useSelector((s) => s.calendar);
 
   const [view, setView] = useState(isAdmin ? "month" : "day");
   const [cursor, setCursor] = useState(new Date());
@@ -91,6 +92,13 @@ export default function CalendarView({ scope = "global", projectId = null }) {
   const wxByDate = weather?.byDate || {};
   const wxFor = (day) => (wxOn ? wxByDate[dkey(day)] : null);
   const dayRisk = (day, dayItems) => { const w = wxFor(day); return !!(w && w.risky && dayItems.some((it) => it.isWeatherSensitive)); };
+
+  // Notes / journal — project-scoped, same single-project context as weather.
+  const reloadNotes = useCallback(() => {
+    if (wxProjectId) dispatch(fetchProjectNotesAsync({ getToken, projectId: wxProjectId, from: win.from.toISOString(), to: win.to.toISOString() }));
+  }, [dispatch, getToken, wxProjectId, win.from, win.to]);
+  useEffect(() => { reloadNotes(); }, [reloadNotes]);
+  const notesForDay = (day) => (notes || []).filter((n) => n.noteDate && isSameDay(parseISO(n.noteDate), day));
 
   // Project options (for the global create-event picker) derived from the feed
   const projectOptions = useMemo(() => {
@@ -175,6 +183,15 @@ export default function CalendarView({ scope = "global", projectId = null }) {
       .unwrap().then(() => { toast.success("Event deleted"); setModalItem(null); reload(); })
       .catch((e) => toast.error(e || "Could not delete"));
   };
+  const addNote = (body, type) => {
+    if (!wxProjectId) { toast.error("Notes are per-project — open a project calendar or filter to one project"); return; }
+    dispatch(createNoteAsync({ getToken, note: { projectId: wxProjectId, body, type, noteDate: selected.toISOString() } }))
+      .unwrap().then(() => { toast.success("Note added"); reloadNotes(); }).catch((e) => toast.error(e || "Could not add note"));
+  };
+  const removeNote = (noteId) =>
+    dispatch(deleteNoteAsync({ getToken, noteId })).unwrap().then(() => { toast.success("Note deleted"); reloadNotes(); }).catch((e) => toast.error(e || "Could not delete"));
+  const convertNote = (noteId) =>
+    dispatch(convertNoteToTaskAsync({ getToken, noteId })).unwrap().then(() => { toast.success("Task created from note"); reloadNotes(); reload(); }).catch((e) => toast.error(e || "Could not convert"));
 
   // ── drag to reschedule (tasks) ────────────────────────────────────────────────
   const onDropDay = (e, day) => {
@@ -424,6 +441,7 @@ export default function CalendarView({ scope = "global", projectId = null }) {
               ? itemsForDay(selected).map((it) => <AgendaRow key={it.id} it={it} />)
               : <div className="py-4 text-sm text-zinc-500 dark:text-zinc-400">Click a day to see everything on it.</div>}
           </div>
+          {wxProjectId && <NotesPanel notes={notesForDay(selected)} onAdd={addNote} onDelete={removeNote} onConvert={convertNote} />}
         </div>
       </div>
 
@@ -554,10 +572,17 @@ function NewEventModal({ onClose, defaultDate, scope, projectId, projectOptions,
   const [date, setDate] = useState(format(defaultDate, "yyyy-MM-dd"));
   const [start, setStart] = useState("09:00");
   const [weather, setWeather] = useState(false);
+  const [repeat, setRepeat] = useState("none");
+  const [count, setCount] = useState("");
   const submit = () => {
     if (!pid) { toast.error("Pick a project"); return; }
     const startAt = new Date(`${date}T${start || "09:00"}:00`).toISOString();
-    onCreate(pid, { title: title.trim() || "Untitled event", type, startAt, isWeatherSensitive: weather });
+    const event = { title: title.trim() || "Untitled event", type, startAt, isWeatherSensitive: weather };
+    if (repeat !== "none") {
+      const n = parseInt(count, 10);
+      event.rrule = `FREQ=${repeat}` + (n > 0 ? `;COUNT=${n}` : "");
+    }
+    onCreate(pid, event);
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/50" onClick={onClose}>
@@ -585,6 +610,20 @@ function NewEventModal({ onClose, defaultDate, scope, projectId, projectOptions,
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
             <label className="block"><span className="text-xs font-semibold text-zinc-500">Start</span>
               <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block"><span className="text-xs font-semibold text-zinc-500">Repeat</span>
+              <select value={repeat} onChange={(e) => setRepeat(e.target.value)} className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-sm">
+                <option value="none">Does not repeat</option>
+                <option value="DAILY">Daily</option>
+                <option value="WEEKLY">Weekly</option>
+                <option value="MONTHLY">Monthly</option>
+              </select></label>
+            {repeat !== "none" && (
+              <label className="block"><span className="text-xs font-semibold text-zinc-500">Occurrences</span>
+                <input value={count} onChange={(e) => setCount(e.target.value)} inputMode="numeric" placeholder="e.g. 12"
+                  className="mt-1 w-full h-9 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 text-sm" /></label>
+            )}
           </div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={weather} onChange={(e) => setWeather(e.target.checked)} className="w-4 h-4" /> Weather-sensitive activity</label>
           <div className="flex gap-2 pt-1">
@@ -630,6 +669,44 @@ function LocationModal({ onClose, current, onSave }) {
             <button onClick={submit} className="h-9 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium">Save location</button>
             <button onClick={onClose} className="h-9 px-4 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">Cancel</button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const NOTE_TYPES = { GENERAL: "General", SITE_VISIT: "Site visit", PROGRESS: "Progress", ISSUE: "Issue", DECISION: "Decision" };
+
+function NotesPanel({ notes, onAdd, onDelete, onConvert }) {
+  const [text, setText] = useState("");
+  const [type, setType] = useState("GENERAL");
+  const submit = () => { const t = text.trim(); if (!t) return; onAdd(t, type); setText(""); };
+  return (
+    <div className="mt-4 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+      <h4 className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-2">Notes / journal</h4>
+      <div className="flex flex-col gap-2 mb-3">
+        {notes.length ? notes.map((n) => (
+          <div key={n.id} className="group rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5 text-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{NOTE_TYPES[n.type] || n.type}</span>
+              <span className="text-[11px] text-zinc-400">{n.author?.name || ""}</span>
+              <div className="ml-auto flex gap-2 items-center opacity-0 group-hover:opacity-100 transition">
+                <button onClick={() => onConvert(n.id)} title="Convert to task" className="text-[11px] font-medium text-blue-600 dark:text-blue-400">→ task</button>
+                <button onClick={() => onDelete(n.id)} title="Delete note" className="text-zinc-400 hover:text-red-600"><X size={13} /></button>
+              </div>
+            </div>
+            <p className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{n.body}</p>
+          </div>
+        )) : <div className="text-sm text-zinc-400">No notes for this day.</div>}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} placeholder="Add a note for this day…"
+          className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-sm resize-y" />
+        <div className="flex gap-2 items-center">
+          <select value={type} onChange={(e) => setType(e.target.value)} className="h-8 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 text-xs">
+            {Object.entries(NOTE_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <button onClick={submit} className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium ml-auto">Add note</button>
         </div>
       </div>
     </div>

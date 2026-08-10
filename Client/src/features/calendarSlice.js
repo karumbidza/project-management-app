@@ -103,13 +103,65 @@ export const setProjectLocationAsync = createAsyncThunk(
   },
 );
 
+// FOLLO CALENDAR — Phase 3 notes
+export const fetchProjectNotesAsync = createAsyncThunk(
+  "calendar/fetchNotes",
+  async ({ getToken, projectId, from, to }, { rejectWithValue }) => {
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const result = await apiCall(`${API_V1}/calendar/project/${projectId}/notes?${params.toString()}`, {}, getToken);
+      return result.data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const createNoteAsync = createAsyncThunk(
+  "calendar/createNote",
+  async ({ getToken, note }, { rejectWithValue }) => {
+    try {
+      const result = await apiCall(`${API_V1}/calendar/notes`, { method: "POST", body: JSON.stringify(note) }, getToken);
+      return result.data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const deleteNoteAsync = createAsyncThunk(
+  "calendar/deleteNote",
+  async ({ getToken, noteId }, { rejectWithValue }) => {
+    try {
+      await apiCall(`${API_V1}/calendar/notes/${noteId}`, { method: "DELETE" }, getToken);
+      return { noteId };
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
+export const convertNoteToTaskAsync = createAsyncThunk(
+  "calendar/convertNote",
+  async ({ getToken, noteId, body }, { rejectWithValue }) => {
+    try {
+      const result = await apiCall(`${API_V1}/calendar/notes/${noteId}/convert-to-task`, { method: "POST", body: JSON.stringify(body || {}) }, getToken);
+      return result.data;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SLICE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const calendarSlice = createSlice({
   name: "calendar",
-  initialState: { items: [], range: null, loading: false, error: null, weather: { location: null, byDate: {} } },
+  initialState: { items: [], range: null, loading: false, error: null, weather: { location: null, byDate: {} }, notes: [] },
   reducers: {},
   extraReducers: (builder) => {
     builder
@@ -135,6 +187,9 @@ const calendarSlice = createSlice({
       })
       .addCase(setProjectLocationAsync.fulfilled, (state, action) => {
         state.weather.location = action.payload || state.weather.location;
+      })
+      .addCase(fetchProjectNotesAsync.fulfilled, (state, action) => {
+        state.notes = action.payload || [];
       });
   },
 });
